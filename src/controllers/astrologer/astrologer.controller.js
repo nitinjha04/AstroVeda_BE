@@ -127,9 +127,29 @@ const rejectChat = asyncHandler(async (req, res) => {
 const pendingChats = asyncHandler(async (req, res) => {
   const profile = await Astrologer.findOne({ user: req.user._id });
   const items = await ChatRoom.find({ astrologer: profile._id, status: 'pending' })
-    .populate('customer', 'name avatar')
-    .sort({ createdAt: -1 });
-  return success(res, { data: items });
+    .populate('customer', 'name avatar gender dateOfBirth birthTime birthPlace privacy')
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const data = items.map((room) => {
+    const c = room.customer;
+    if (!c) return room;
+    const customer = {
+      _id: c._id,
+      name: c.name,
+      avatar: c.avatar,
+      sharedBirthDetails: !!c.privacy?.shareBirthDetailsWithAstrologers,
+    };
+    if (c.privacy?.shareBirthDetailsWithAstrologers) {
+      customer.gender = c.gender || '';
+      customer.dateOfBirth = c.dateOfBirth || null;
+      customer.birthTime = c.birthTime || '';
+      customer.birthPlace = c.birthPlace || '';
+    }
+    return { ...room, customer };
+  });
+
+  return success(res, { data });
 });
 
 const sendMessage = asyncHandler(async (req, res) => {

@@ -64,6 +64,11 @@ const userSchema = new mongoose.Schema(
     fcmTokens: [String],
     lastLoginAt: Date,
     permissions: [String],
+    /** When enabled, birth details are sent to AI / shown to astrologers */
+    privacy: {
+      shareBirthDetailsWithAi: { type: Boolean, default: false },
+      shareBirthDetailsWithAstrologers: { type: Boolean, default: false },
+    },
     preferences: {
       darkMode: { type: Boolean, default: false },
       language: { type: String, default: 'en' },

@@ -17,7 +17,10 @@ const router = express.Router();
 router.use(authenticate, authorize(ROLES.CUSTOMER, ROLES.ADMIN));
 
 // Profile & astrology
+router.get('/profile', profileController.getProfile);
 router.patch('/profile', profileController.updateProfile);
+router.post('/profile/password', profileController.changePassword);
+router.post('/profile/avatar', require('../../middlewares/upload').single('avatar'), profileController.uploadAvatar);
 router.get('/horoscope/daily', profileController.dailyHoroscope);
 router.get('/horoscope/all', profileController.allHoroscopes);
 router.post('/kundli', profileController.generateKundli);
@@ -34,10 +37,15 @@ router.post('/wallet/confirm-stub', walletController.confirmStubRecharge);
 // Chat
 router.post('/chat/ai/start', chatController.startAi);
 router.post('/chat/request', chatController.requestChat);
-router.post('/chat/:id/message', chatMessageRules, validate, chatController.sendMessage);
-router.post('/chat/:id/end', chatController.endChat);
-router.get('/chat/:id/messages', chatController.getMessages);
+router.post('/chat/end-active', chatController.endActiveChats);
+router.get('/chat/active', chatController.getActiveChat);
 router.get('/chats', chatController.history);
+router.post('/chat/:id/message', chatMessageRules, validate, chatController.sendMessage);
+router.post('/chat/:id/ai-reply', chatMessageRules, validate, chatController.aiReply);
+router.post('/chat/:id/end', chatController.endChat);
+router.post('/chat/:id/resume', chatController.resumeAi);
+router.get('/chat/:id/open', chatController.openAi);
+router.get('/chat/:id/messages', chatController.getMessages);
 
 // Store
 router.get('/store/products', storeController.listProducts);

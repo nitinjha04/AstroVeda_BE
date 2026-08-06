@@ -5,7 +5,7 @@ const authRoutes = require('./common/auth.routes');
 const customerRoutes = require('./customer/customer.routes');
 const astrologerRoutes = require('./astrologer/astrologer.routes');
 const adminRoutes = require('./admin/admin.routes');
-const { Banner, Blog, Category, Product, Astrologer } = require('../models');
+const { Banner, Blog, Category, Product, Astrologer, AIAstrologer } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { success } = require('../utils/apiResponse');
 const { optionalAuth } = require('../middlewares/auth');
@@ -90,14 +90,26 @@ router.get(
 router.get(
   '/public/astrologers',
   asyncHandler(async (req, res) => {
-    const limit = Math.min(Number(req.query.limit) || 12, 40);
-    const filter = { status: ASTROLOGER_STATUS.APPROVED };
-    if (req.query.online === 'true') filter.isOnline = true;
-    const items = await Astrologer.find(filter)
-      .populate('user', 'name avatar')
-      .sort({ isOnline: -1, 'ratings.average': -1 })
-      .limit(limit);
-    return success(res, { data: items });
+    const aiAstrologerService = require('../services/aiAstrologer.service');
+    const result = await aiAstrologerService.listAiAstrologers({
+      search: req.query.search,
+      expertise: req.query.expertise,
+      language: req.query.language,
+      minRating: req.query.minRating,
+      maxPrice: req.query.maxPrice,
+      page: req.query.page || 1,
+      limit: Math.min(Number(req.query.limit) || 24, 40),
+    });
+    return success(res, { data: result.items, meta: result.meta });
+  })
+);
+
+router.get(
+  '/public/astrologers/:slug',
+  asyncHandler(async (req, res) => {
+    const aiAstrologerService = require('../services/aiAstrologer.service');
+    const data = await aiAstrologerService.getBySlug(req.params.slug);
+    return success(res, { data });
   })
 );
 

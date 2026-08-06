@@ -291,6 +291,14 @@ const seedDatabase = async () => {
     }
 
     logger.info('Database seed complete — demo JSON loaded');
+
+    try {
+      const aiAstrologerService = require('../services/aiAstrologer.service');
+      const n = await aiAstrologerService.seedAiAstrologers();
+      logger.info(`AI Astrologers seeded: ${n}`);
+    } catch (e) {
+      logger.error(`AI Astrologer seed error: ${e.message}`);
+    }
   } catch (err) {
     logger.error(`Seed error: ${err.message}`);
     logger.error(err.stack);

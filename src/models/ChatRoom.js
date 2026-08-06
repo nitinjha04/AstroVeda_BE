@@ -20,6 +20,12 @@ const chatRoomSchema = new mongoose.Schema(
       ref: 'Astrologer',
       index: true,
     },
+    /** AI persona (when type is ai) */
+    aiAstrologer: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'AIAstrologer',
+      index: true,
+    },
     astrologerUser: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -36,6 +42,8 @@ const chatRoomSchema = new mongoose.Schema(
     endedAt: Date,
     endedBy: { type: String, enum: ['customer', 'astrologer', 'system', 'wallet', null], default: null },
     endReason: String,
+    /** Short label shown in chat history (from first user message) */
+    title: { type: String, trim: true, maxlength: 120 },
     durationSeconds: { type: Number, default: 0 },
     billedMinutes: { type: Number, default: 0 },
     totalCharged: { type: Number, default: 0 },
@@ -58,6 +66,7 @@ const chatRoomSchema = new mongoose.Schema(
 );
 
 chatRoomSchema.index({ customer: 1, status: 1 });
+chatRoomSchema.index({ customer: 1, aiAstrologer: 1, updatedAt: -1 });
 chatRoomSchema.index({ astrologer: 1, status: 1 });
 chatRoomSchema.index({ createdAt: -1 });
 

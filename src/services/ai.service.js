@@ -1,6 +1,6 @@
 const OpenAI = require('openai');
 const config = require('../config');
-const { Settings, AIChat, Message } = require('../models');
+const { Settings, AIChat, Message, ChatRoom, User } = require('../models');
 const AppError = require('../utils/AppError');
 const logger = require('../utils/logger');
 const { cacheGet, cacheSet } = require('../config/redis');
@@ -154,7 +154,10 @@ const generateAiReply = async (chatRoomId, customerMessage) => {
   const settings = await getAiSettings();
   if (!settings.enabled) throw new AppError('AI chat is currently disabled', 503);
 
-  const aiChat = await AIChat.findOne({ chatRoom: chatRoomId });
+  const [aiChat, room] = await Promise.all([
+    AIChat.findOne({ chatRoom: chatRoomId }),
+    ChatRoom.findById(chatRoomId).select('customer aiConfig aiAstrologer').lean(),
+  ]);
   if (!aiChat) throw new AppError('AI chat session not found', 404);
 
   const history = await Message.find({
@@ -164,8 +167,37 @@ const generateAiReply = async (chatRoomId, customerMessage) => {
     .sort({ createdAt: 1 })
     .limit(12);
 
+  let birthContext = '';
+  if (room?.customer) {
+    const customer = await User.findById(room.customer)
+      .select('name gender dateOfBirth birthTime birthPlace privacy')
+      .lean();
+    if (customer?.privacy?.shareBirthDetailsWithAi) {
+      const parts = [];
+      if (customer.name) parts.push(`Name: ${customer.name}`);
+      if (customer.gender) parts.push(`Gender: ${customer.gender}`);
+      if (customer.dateOfBirth) {
+        parts.push(`Date of birth: ${new Date(customer.dateOfBirth).toISOString().slice(0, 10)}`);
+      }
+      if (customer.birthTime) parts.push(`Birth time: ${customer.birthTime}`);
+      if (customer.birthPlace) parts.push(`Birth place: ${customer.birthPlace}`);
+      if (parts.length) {
+        birthContext = [
+          'The seeker shared their birth profile (use only if relevant; do not invent missing details):',
+          parts.join('; '),
+        ].join(' ');
+      }
+    }
+  }
+
+  const personaPrompt =
+    room?.aiConfig?.systemPrompt ||
+    aiChat.systemPrompt ||
+    aiStyleRules.systemPrompt;
+
   const messages = [
-    { role: 'system', content: aiStyleRules.systemPrompt },
+    { role: 'system', content: personaPrompt },
+    ...(birthContext ? [{ role: 'system', content: birthContext }] : []),
     ...history.map((m) => ({
       role: m.senderRole === 'customer' ? 'user' : 'assistant',
       content: m.content,

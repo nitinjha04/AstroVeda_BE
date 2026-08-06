@@ -147,8 +147,12 @@ const initSockets = (io) => {
 
     socket.on('chat:end', async ({ chatRoomId, reason }) => {
       try {
-        const endedBy = socket.user.role === 'astrologer' ? 'astrologer' : 'customer';
-        await chatService.endChat(chatRoomId, { endedBy, endReason: reason || 'Ended via socket', io });
+        // Prefer ending without inventing a second path if HTTP already closed it
+        await chatService.endChat(chatRoomId, {
+          endedBy: socket.user.role === 'astrologer' ? 'astrologer' : 'customer',
+          endReason: reason || 'Ended by user',
+          io,
+        });
         stopBillingTimer(chatRoomId);
       } catch (err) {
         socket.emit('error:message', { message: err.message });

@@ -5,6 +5,8 @@ const {
   AIChat,
   Astrologer,
   Notification,
+  User,
+  AIAstrologer,
 } = require('../models');
 const AppError = require('../utils/AppError');
 const { CHAT_TYPE, CHAT_STATUS, WALLET_TX_TYPE, ASTROLOGER_STATUS } = require('../utils/constants');
@@ -12,110 +14,115 @@ const config = require('../config');
 const walletService = require('./wallet.service');
 const aiService = require('./ai.service');
 const logger = require('../utils/logger');
+const AI_GREETINGS = require('../data/aiGreetings');
 
-const startAiChat = async (customerId) => {
-  const settings = await aiService.getAiSettings();
+const pickGreeting = (custom) =>
+  custom || AI_GREETINGS[Math.floor(Math.random() * AI_GREETINGS.length)];
+
+/**
+ * Start a new AI chat with a specific AI Astrologer persona.
+ * Ends any other live AI session first (one live billable session at a time).
+ */
+const startAiChat = async (customerId, aiAstrologerId) => {
+  if (!aiAstrologerId) throw new AppError('Select an AI Astrologer to start chat', 400);
+
+  const [settings, wallet, persona, otherActive] = await Promise.all([
+    aiService.getAiSettings(),
+    walletService.getBalance(customerId),
+    AIAstrologer.findOne({ _id: aiAstrologerId, isActive: true }),
+    ChatRoom.find({
+      customer: customerId,
+      type: CHAT_TYPE.AI,
+      status: CHAT_STATUS.ACTIVE,
+    }).select('_id'),
+  ]);
+
   if (!settings.enabled) throw new AppError('AI chat is disabled', 503);
+  if (!persona) throw new AppError('AI Astrologer not found', 404);
 
-  const price = settings.pricePerMinute || config.wallet.defaultAiPricePerMinute;
-  const wallet = await walletService.getBalance(customerId);
+  const price = persona.pricePerMinute || settings.pricePerMinute || config.wallet.defaultAiPricePerMinute;
   if (!wallet.canAfford(price)) {
     throw new AppError(`Insufficient balance. Need at least ₹${price} for 1 minute`, 402);
   }
 
-  const active = await ChatRoom.findOne({
-    customer: customerId,
-    type: CHAT_TYPE.AI,
-    status: CHAT_STATUS.ACTIVE,
-  });
-  if (active) throw new AppError('You already have an active AI chat', 409);
+  // Close other live sessions so billing is clean
+  for (const prev of otherActive) {
+    await endChat(prev._id, {
+      endedBy: 'system',
+      endReason: 'Started a new AI session',
+    });
+  }
+
+  const systemPrompt = persona.systemPrompt || settings.systemPrompt;
 
   const room = await ChatRoom.create({
     type: CHAT_TYPE.AI,
     customer: customerId,
+    aiAstrologer: persona._id,
     status: CHAT_STATUS.ACTIVE,
     pricePerMinute: price,
     startedAt: new Date(),
     lastDeductionAt: new Date(),
+    billedMinutes: 1,
+    totalCharged: price,
+    title: `Chat with ${persona.displayName}`,
     aiConfig: {
       model: settings.model,
       temperature: settings.temperature,
-      systemPrompt: settings.systemPrompt,
+      systemPrompt,
+    },
+    metadata: {
+      aiAstrologerSlug: persona.slug,
+      aiAstrologerName: persona.displayName,
     },
   });
 
-  await AIChat.create({
-    chatRoom: room._id,
-    customer: customerId,
-    model: settings.model,
-    temperature: settings.temperature,
-    systemPrompt: settings.systemPrompt,
-  });
+  const greetingText = pickGreeting(persona.greeting);
 
-  // First minute charged upfront
-  await walletService.debit({
-    userId: customerId,
-    amount: price,
-    type: WALLET_TX_TYPE.CHAT_DEDUCTION,
-    description: 'AI chat – minute 1',
-    referenceModel: 'ChatRoom',
-    referenceId: room._id,
-  });
-  room.billedMinutes = 1;
-  room.totalCharged = price;
-  await room.save();
+  const [, { wallet: updatedWallet }, greetingMsg] = await Promise.all([
+    AIChat.create({
+      chatRoom: room._id,
+      customer: customerId,
+      model: settings.model,
+      temperature: settings.temperature,
+      systemPrompt,
+    }),
+    walletService.debit({
+      userId: customerId,
+      amount: price,
+      type: WALLET_TX_TYPE.CHAT_DEDUCTION,
+      description: `AI chat with ${persona.displayName} – minute 1`,
+      referenceModel: 'ChatRoom',
+      referenceId: room._id,
+    }),
+    Message.create({
+      chatRoom: room._id,
+      senderRole: 'ai',
+      content: greetingText,
+      contentType: 'text',
+      status: 'delivered',
+      deliveredAt: new Date(),
+      metadata: { kind: 'static_greeting', aiAstrologer: persona._id },
+    }),
+  ]);
 
-  await Message.create({
-    chatRoom: room._id,
-    senderRole: 'ai',
-    content:
-      'Namaste! I am your AstroVerse AI guide. Share your birth details or ask anything about your stars, career, love, or life path.',
-    contentType: 'text',
-    status: 'delivered',
-  });
+  const roomPopulated = await ChatRoom.findById(room._id)
+    .populate('aiAstrologer', 'displayName slug avatarEmoji tagline pricePerMinute ratingAverage languages specialties')
+    .lean();
 
-  return room;
+  return {
+    room: roomPopulated,
+    messages: [greetingMsg],
+    wallet: updatedWallet,
+    aiAstrologer: persona.toObject ? { ...persona.toObject(), systemPrompt: undefined } : persona,
+  };
 };
 
-const requestHumanChat = async (customerId, astrologerId) => {
-  const astrologer = await Astrologer.findById(astrologerId);
-  if (!astrologer || astrologer.status !== ASTROLOGER_STATUS.APPROVED) {
-    throw new AppError('Astrologer not available', 404);
-  }
-  if (!astrologer.isOnline || !astrologer.isAvailableForChat) {
-    throw new AppError('Astrologer is offline or unavailable', 409);
-  }
-
-  const price = astrologer.pricing.chatPerMinute;
-  const wallet = await walletService.getBalance(customerId);
-  if (!wallet.canAfford(price)) {
-    throw new AppError(`Insufficient balance. Need at least ₹${price}`, 402);
-  }
-
-  const existing = await ChatRoom.findOne({
-    customer: customerId,
-    status: { $in: [CHAT_STATUS.PENDING, CHAT_STATUS.ACTIVE] },
-  });
-  if (existing) throw new AppError('You already have a pending/active chat', 409);
-
-  const room = await ChatRoom.create({
-    type: CHAT_TYPE.HUMAN,
-    customer: customerId,
-    astrologer: astrologer._id,
-    astrologerUser: astrologer.user,
-    status: CHAT_STATUS.PENDING,
-    pricePerMinute: price,
-  });
-
-  await Notification.create({
-    user: astrologer.user,
-    title: 'New Chat Request',
-    body: 'A customer wants to chat with you',
-    type: 'chat',
-    data: { chatRoomId: room._id },
-  });
-
-  return room;
+const requestHumanChat = async () => {
+  throw new AppError(
+    'Human astrologers are temporarily unavailable. Please choose an AI Astrologer.',
+    503
+  );
 };
 
 const acceptChat = async (astrologerUserId, chatRoomId) => {
@@ -202,6 +209,7 @@ const sendMessage = async ({
   content,
   contentType = 'text',
   mediaUrl,
+  skipAi = false,
   onCustomerMessage,
   onAiThinking,
 }) => {
@@ -226,13 +234,19 @@ const sendMessage = async ({
     status: 'sent',
   });
 
-  // Emit user bubble immediately (socket path) before AI latency
+  // Name the thread from the first customer message (ChatGPT-style history)
+  if (senderRole === 'customer' && content?.trim() && !room.title) {
+    const t = content.trim().replace(/\s+/g, ' ');
+    room.title = t.length > 80 ? `${t.slice(0, 77)}…` : t;
+    await room.save();
+  }
+
   if (typeof onCustomerMessage === 'function') {
     onCustomerMessage(message);
   }
 
   let aiReply = null;
-  if (room.type === CHAT_TYPE.AI && senderRole === 'customer') {
+  if (!skipAi && room.type === CHAT_TYPE.AI && senderRole === 'customer') {
     if (typeof onAiThinking === 'function') onAiThinking();
 
     const result = await aiService.generateAiReply(chatRoomId, content);
@@ -247,6 +261,55 @@ const sendMessage = async ({
   }
 
   return { message, aiReply };
+};
+
+/** Generate AI reply for an AI room after customer message was saved */
+const generateAiReplyForRoom = async (chatRoomId, userId, content) => {
+  const room = await ChatRoom.findById(chatRoomId);
+  if (!room) throw new AppError('Chat not found', 404);
+  if (room.type !== CHAT_TYPE.AI) throw new AppError('Not an AI chat', 400);
+  if (room.status !== CHAT_STATUS.ACTIVE) throw new AppError('Chat is not active', 409);
+  if (room.customer.toString() !== userId.toString()) throw new AppError('Unauthorized', 403);
+
+  const result = await aiService.generateAiReply(chatRoomId, content);
+  const aiReply = await Message.create({
+    chatRoom: chatRoomId,
+    senderRole: 'ai',
+    content: result.content,
+    contentType: 'text',
+    status: 'delivered',
+    deliveredAt: new Date(),
+  });
+  return aiReply;
+};
+
+/** End every active / pending chat for a customer (used after page refresh) */
+const endActiveChatsForUser = async (userId, { io = null, endReason = 'Session ended (page closed or refreshed)' } = {}) => {
+  const rooms = await ChatRoom.find({
+    customer: userId,
+    status: { $in: [CHAT_STATUS.ACTIVE, CHAT_STATUS.PENDING] },
+  });
+
+  const ended = [];
+  for (const room of rooms) {
+    // only end AI by default on refresh, also end pending human requests
+    const result = await endChat(room._id, {
+      endedBy: 'system',
+      endReason,
+      io,
+    });
+    ended.push(result);
+  }
+  return ended;
+};
+
+const getActiveChatForUser = async (userId, type = null) => {
+  const filter = {
+    customer: userId,
+    status: CHAT_STATUS.ACTIVE,
+  };
+  if (type) filter.type = type;
+  return ChatRoom.findOne(filter).sort({ startedAt: -1 });
 };
 
 const deductMinute = async (chatRoomId, io = null) => {
@@ -296,35 +359,59 @@ const deductMinute = async (chatRoomId, io = null) => {
 };
 
 const endChat = async (chatRoomId, { endedBy = 'system', endReason = '', io = null } = {}) => {
-  const room = await ChatRoom.findById(chatRoomId);
-  if (!room) throw new AppError('Chat not found', 404);
-  if (room.status === CHAT_STATUS.ENDED) return room;
+  const existing = await ChatRoom.findById(chatRoomId);
+  if (!existing) throw new AppError('Chat not found', 404);
+  if (existing.status === CHAT_STATUS.ENDED) return existing;
 
-  room.status = CHAT_STATUS.ENDED;
-  room.endedAt = new Date();
-  room.endedBy = endedBy;
-  room.endReason = endReason;
-  if (room.startedAt) {
-    room.durationSeconds = Math.floor((room.endedAt - room.startedAt) / 1000);
+  const endedAt = new Date();
+  const durationSeconds = existing.startedAt
+    ? Math.floor((endedAt - existing.startedAt) / 1000)
+    : existing.durationSeconds || 0;
+
+  let platformCommission = existing.platformCommission || 0;
+  let astrologerEarning = existing.astrologerEarning || 0;
+
+  if (existing.type === CHAT_TYPE.HUMAN && existing.astrologer) {
+    const commissionPercent = config.wallet.platformCommissionPercent;
+    platformCommission = Number(((existing.totalCharged * commissionPercent) / 100).toFixed(2));
+    astrologerEarning = Number((existing.totalCharged - platformCommission).toFixed(2));
   }
 
-  if (room.type === CHAT_TYPE.HUMAN && room.astrologer) {
-    const commissionPercent = config.wallet.platformCommissionPercent;
-    room.platformCommission = Number(((room.totalCharged * commissionPercent) / 100).toFixed(2));
-    room.astrologerEarning = Number((room.totalCharged - room.platformCommission).toFixed(2));
+  // Atomic: only one concurrent ender wins — prevents duplicate system messages
+  const room = await ChatRoom.findOneAndUpdate(
+    { _id: chatRoomId, status: { $ne: CHAT_STATUS.ENDED } },
+    {
+      $set: {
+        status: CHAT_STATUS.ENDED,
+        endedAt,
+        endedBy,
+        endReason,
+        durationSeconds,
+        platformCommission,
+        astrologerEarning,
+      },
+    },
+    { new: true }
+  );
 
+  if (!room) {
+    return ChatRoom.findById(chatRoomId);
+  }
+
+  // Side-effects only for the winner request
+  if (room.type === CHAT_TYPE.HUMAN && room.astrologer) {
     await Astrologer.findByIdAndUpdate(room.astrologer, {
       $inc: {
         'stats.totalChats': 1,
         'stats.totalMinutes': room.billedMinutes,
-        'stats.totalEarnings': room.astrologerEarning,
+        'stats.totalEarnings': astrologerEarning,
       },
     });
 
-    if (room.astrologerEarning > 0) {
+    if (astrologerEarning > 0) {
       await walletService.credit({
         userId: room.astrologerUser,
-        amount: room.astrologerEarning,
+        amount: astrologerEarning,
         type: WALLET_TX_TYPE.EARNING,
         description: `Chat earning – room ${room._id}`,
         referenceModel: 'ChatRoom',
@@ -333,22 +420,30 @@ const endChat = async (chatRoomId, { endedBy = 'system', endReason = '', io = nu
     }
   }
 
-  await room.save();
-
-  await Message.create({
+  const alreadySummary = await Message.exists({
     chatRoom: room._id,
     senderRole: 'system',
-    content: `Chat ended. Duration: ${room.billedMinutes} min. Charged: ₹${room.totalCharged}`,
-    contentType: 'system',
+    'metadata.kind': 'chat_ended',
   });
+
+  if (!alreadySummary) {
+    await Message.create({
+      chatRoom: room._id,
+      senderRole: 'system',
+      content: `Chat ended. Duration: ${room.billedMinutes} min. Charged: ₹${room.totalCharged}`,
+      contentType: 'system',
+      metadata: { kind: 'chat_ended' },
+    });
+  }
 
   if (io) {
     io.to(`chat:${room._id}`).emit('chat:end', {
       chatRoomId: room._id,
       endedBy,
-      endReason,
+      endReason: endReason || '',
       billedMinutes: room.billedMinutes,
       totalCharged: room.totalCharged,
+      silent: endedBy === 'customer' || endedBy === 'system',
     });
   }
 
@@ -356,40 +451,212 @@ const endChat = async (chatRoomId, { endedBy = 'system', endReason = '', io = nu
   return room;
 };
 
-const getMessages = async (chatRoomId, userId, { page = 1, limit = 50 } = {}) => {
-  const room = await ChatRoom.findById(chatRoomId);
+/** Latest-first page of messages (fast). Pass `before` = oldest loaded msg id for scroll-up. */
+const getMessages = async (chatRoomId, userId, { limit = 40, before = null } = {}) => {
+  const room = await ChatRoom.findById(chatRoomId).lean();
   if (!room) throw new AppError('Chat not found', 404);
 
-  const isParticipant =
-    room.customer.toString() === userId.toString() ||
-    room.astrologerUser?.toString() === userId.toString();
-  if (!isParticipant) throw new AppError('Unauthorized', 403);
+  const isCustomer = room.customer.toString() === userId.toString();
+  const isAstrologer = room.astrologerUser?.toString() === userId.toString();
+  if (!isCustomer && !isAstrologer) throw new AppError('Unauthorized', 403);
 
-  const skip = (page - 1) * limit;
-  const [items, total] = await Promise.all([
-    Message.find({ chatRoom: chatRoomId }).sort({ createdAt: 1 }).skip(skip).limit(limit),
-    Message.countDocuments({ chatRoom: chatRoomId }),
-  ]);
-  return { room, items, meta: { page, limit, total, pages: Math.ceil(total / limit) } };
+  const safeLimit = Math.min(Math.max(Number(limit) || 40, 1), 50);
+  const filter = { chatRoom: chatRoomId };
+
+  if (before) {
+    const anchor = await Message.findById(before).select('createdAt').lean();
+    if (anchor?.createdAt) {
+      filter.createdAt = { $lt: anchor.createdAt };
+    }
+  }
+
+  // Fetch limit+1 to know if older pages exist; skip countDocuments (slow on large rooms)
+  const batch = await Message.find(filter)
+    .sort({ createdAt: -1 })
+    .limit(safeLimit + 1)
+    .select('-__v')
+    .lean();
+
+  const hasMore = batch.length > safeLimit;
+  let items = (hasMore ? batch.slice(0, safeLimit) : batch).reverse();
+
+  // Hide accidental duplicate system “chat ended” lines (legacy race data)
+  items = items.filter((m, i, arr) => {
+    if (m.senderRole !== 'system') return true;
+    const prev = arr[i - 1];
+    return !(prev && prev.senderRole === 'system' && prev.content === m.content);
+  });
+
+  // For astrologers: only expose birth details when the customer opted in
+  let customerPublic = null;
+  if (isAstrologer && room.type === CHAT_TYPE.HUMAN) {
+    const c = await User.findById(room.customer)
+      .select('name avatar gender dateOfBirth birthTime birthPlace privacy')
+      .lean();
+    if (c) {
+      customerPublic = {
+        _id: c._id,
+        name: c.name,
+        avatar: c.avatar,
+      };
+      if (c.privacy?.shareBirthDetailsWithAstrologers) {
+        customerPublic.gender = c.gender || '';
+        customerPublic.dateOfBirth = c.dateOfBirth || null;
+        customerPublic.birthTime = c.birthTime || '';
+        customerPublic.birthPlace = c.birthPlace || '';
+        customerPublic.sharedBirthDetails = true;
+      } else {
+        customerPublic.sharedBirthDetails = false;
+      }
+    }
+  }
+
+  return {
+    room,
+    items,
+    customer: customerPublic,
+    meta: {
+      hasMore,
+      limit: safeLimit,
+      before: items.length ? items[0]._id : null,
+    },
+  };
 };
 
-const getChatHistory = async (userId, { page = 1, limit = 20, type } = {}) => {
+const getChatHistory = async (userId, { page = 1, limit = 20, type, aiAstrologerId } = {}) => {
   const filter = {
     $or: [{ customer: userId }, { astrologerUser: userId }],
   };
   if (type) filter.type = type;
+  if (aiAstrologerId) filter.aiAstrologer = aiAstrologerId;
 
   const skip = (page - 1) * limit;
-  const [items, total] = await Promise.all([
+  const [rooms, total] = await Promise.all([
     ChatRoom.find(filter)
       .populate('customer', 'name avatar')
       .populate({ path: 'astrologer', populate: { path: 'user', select: 'name avatar' } })
-      .sort({ createdAt: -1 })
+      .populate('aiAstrologer', 'displayName slug avatarEmoji tagline pricePerMinute')
+      .sort({ updatedAt: -1 })
       .skip(skip)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     ChatRoom.countDocuments(filter),
   ]);
+
+  const roomIds = rooms.map((r) => r._id);
+  const lastMessages = await Message.aggregate([
+    {
+      $match: {
+        chatRoom: { $in: roomIds },
+        senderRole: { $in: ['customer', 'ai', 'astrologer'] },
+      },
+    },
+    { $sort: { createdAt: -1 } },
+    {
+      $group: {
+        _id: '$chatRoom',
+        content: { $first: '$content' },
+        senderRole: { $first: '$senderRole' },
+        createdAt: { $first: '$createdAt' },
+      },
+    },
+  ]);
+  const lastByRoom = Object.fromEntries(lastMessages.map((m) => [String(m._id), m]));
+
+  const items = rooms.map((room) => {
+    const last = lastByRoom[String(room._id)];
+    const preview = last?.content
+      ? last.content.length > 100
+        ? `${last.content.slice(0, 97)}…`
+        : last.content
+      : 'No messages yet';
+    return {
+      ...room,
+      title: room.title || (room.type === CHAT_TYPE.AI ? 'New AI chat' : 'Chat'),
+      lastMessagePreview: preview,
+      lastMessageAt: last?.createdAt || room.updatedAt,
+    };
+  });
+
   return { items, meta: { page, limit, total, pages: Math.ceil(total / limit) } };
+};
+
+/** Open a past AI thread (view messages; does not start billing) */
+const openAiChat = async (customerId, chatRoomId) => {
+  const room = await ChatRoom.findOne({
+    _id: chatRoomId,
+    customer: customerId,
+    type: CHAT_TYPE.AI,
+  });
+  if (!room) throw new AppError('Chat not found', 404);
+  return room;
+};
+
+/** Resume an ended AI thread for more messages (bills next minute) */
+const resumeAiChat = async (customerId, chatRoomId) => {
+  const settings = await aiService.getAiSettings();
+  if (!settings.enabled) throw new AppError('AI chat is disabled', 503);
+
+  const room = await ChatRoom.findOne({
+    _id: chatRoomId,
+    customer: customerId,
+    type: CHAT_TYPE.AI,
+  });
+  if (!room) throw new AppError('Chat not found', 404);
+
+  if (room.status === CHAT_STATUS.ACTIVE) return room;
+
+  if (room.status !== CHAT_STATUS.ENDED) {
+    throw new AppError('This chat cannot be continued', 409);
+  }
+
+  // Close any other active AI sessions first
+  const others = await ChatRoom.find({
+    customer: customerId,
+    type: CHAT_TYPE.AI,
+    status: CHAT_STATUS.ACTIVE,
+    _id: { $ne: room._id },
+  });
+  for (const other of others) {
+    await endChat(other._id, {
+      endedBy: 'system',
+      endReason: 'Switched to another chat',
+    });
+  }
+
+  const price = room.pricePerMinute || settings.pricePerMinute || config.wallet.defaultAiPricePerMinute;
+  const wallet = await walletService.getBalance(customerId);
+  if (!wallet.canAfford(price)) {
+    throw new AppError(`Insufficient balance. Need at least ₹${price} to continue`, 402);
+  }
+
+  await walletService.debit({
+    userId: customerId,
+    amount: price,
+    type: WALLET_TX_TYPE.CHAT_DEDUCTION,
+    description: 'AI chat – continue session',
+    referenceModel: 'ChatRoom',
+    referenceId: room._id,
+  });
+
+  room.status = CHAT_STATUS.ACTIVE;
+  room.endedAt = undefined;
+  room.endedBy = null;
+  room.endReason = undefined;
+  room.lastDeductionAt = new Date();
+  room.billedMinutes += 1;
+  room.totalCharged = Number((room.totalCharged + price).toFixed(2));
+  if (!room.startedAt) room.startedAt = new Date();
+  await room.save();
+
+  await Message.create({
+    chatRoom: room._id,
+    senderRole: 'system',
+    content: 'Session continued — you can keep chatting.',
+    contentType: 'system',
+  });
+
+  return room;
 };
 
 module.exports = {
@@ -398,6 +665,11 @@ module.exports = {
   acceptChat,
   rejectChat,
   sendMessage,
+  generateAiReplyForRoom,
+  endActiveChatsForUser,
+  getActiveChatForUser,
+  openAiChat,
+  resumeAiChat,
   deductMinute,
   endChat,
   getMessages,

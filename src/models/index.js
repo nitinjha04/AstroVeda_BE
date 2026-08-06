@@ -20,4 +20,5 @@ module.exports = {
   Settings: require('./Settings'),
   Cart: require('./Cart'),
   AuditLog: require('./AuditLog'),
+  AIAstrologer: require('./AIAstrologer'),
 };
