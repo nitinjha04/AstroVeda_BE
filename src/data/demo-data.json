@@ -1,0 +1,512 @@
+{
+  "version": 2,
+  "meta": {
+    "name": "AstroVerse Demo Pack",
+    "description": "Local demo data for store, users, astrologers, coupons, blogs, and chat walkthrough",
+    "notes": [
+      "Run API once (or npm run seed) to load this file into MongoDB",
+      "Demo wallet balances are pre-funded so chat works immediately",
+      "Astrologers are pre-approved and online for human chat testing"
+    ]
+  },
+  "demoAccounts": [
+    {
+      "role": "admin",
+      "name": "Super Admin",
+      "email": "admin@astroverse.com",
+      "password": "Admin@AstroVerse2026",
+      "note": "Full admin panel at /admin"
+    },
+    {
+      "role": "customer",
+      "name": "Aarav Mehta",
+      "email": "demo.customer@astroverse.com",
+      "password": "Demo@12345",
+      "phone": "9876500001",
+      "walletBalance": 2500,
+      "dateOfBirth": "1995-03-21",
+      "birthTime": "06:45",
+      "birthPlace": "Mumbai",
+      "gender": "male",
+      "referralCode": "AARAV2026",
+      "note": "Use this account to test AI chat, wallet, store checkout"
+    },
+    {
+      "role": "customer",
+      "name": "Priya Sharma",
+      "email": "priya.demo@astroverse.com",
+      "password": "Demo@12345",
+      "phone": "9876500002",
+      "walletBalance": 800,
+      "dateOfBirth": "1992-08-14",
+      "birthTime": "14:20",
+      "birthPlace": "Delhi",
+      "gender": "female",
+      "referralCode": "PRIYA2026",
+      "note": "Secondary customer for multi-user tests"
+    },
+    {
+      "role": "astrologer",
+      "name": "Pandit Rajesh Sharma",
+      "displayName": "Acharya Rajesh",
+      "email": "rajesh.astro@astroverse.com",
+      "password": "Demo@12345",
+      "phone": "9876501001",
+      "walletBalance": 1200,
+      "bio": "20+ years in Vedic astrology, marriage compatibility & career guidance. Speaks Hindi & English.",
+      "specialties": ["Vedic", "Kundli Matching", "Career", "Marriage"],
+      "languages": ["Hindi", "English"],
+      "experienceYears": 20,
+      "pricing": { "chatPerMinute": 12, "voicePerMinute": 25, "videoPerMinute": 40 },
+      "isOnline": true,
+      "ratings": { "average": 4.8, "count": 126 },
+      "note": "Go online in /astrologer — accept chat requests from customer"
+    },
+    {
+      "role": "astrologer",
+      "name": "Dr. Meera Kapoor",
+      "displayName": "Dr. Meera Kapoor",
+      "email": "meera.astro@astroverse.com",
+      "password": "Demo@12345",
+      "phone": "9876501002",
+      "walletBalance": 950,
+      "bio": "Specialist in tarot, love predictions and life-path guidance with empathetic counselling style.",
+      "specialties": ["Tarot", "Love", "Numerology", "Life Path"],
+      "languages": ["English", "Hindi", "Punjabi"],
+      "experienceYears": 12,
+      "pricing": { "chatPerMinute": 15, "voicePerMinute": 28, "videoPerMinute": 45 },
+      "isOnline": true,
+      "ratings": { "average": 4.9, "count": 98 },
+      "note": "Premium online astrologer for human chat demos"
+    },
+    {
+      "role": "astrologer",
+      "name": "Guru Anand Joshi",
+      "displayName": "Guru Anand",
+      "email": "anand.astro@astroverse.com",
+      "password": "Demo@12345",
+      "phone": "9876501003",
+      "walletBalance": 400,
+      "bio": "Palmistry & muhurat specialist. Currently offline for testing offline states.",
+      "specialties": ["Palmistry", "Muhurat", "Vastu"],
+      "languages": ["Hindi", "Marathi"],
+      "experienceYears": 15,
+      "pricing": { "chatPerMinute": 10, "voicePerMinute": 20, "videoPerMinute": 30 },
+      "isOnline": false,
+      "ratings": { "average": 4.5, "count": 64 },
+      "note": "Offline demo profile"
+    }
+  ],
+  "categories": [
+    {
+      "name": "Gemstones",
+      "slug": "gemstones",
+      "description": "Natural & certified Vedic gemstones",
+      "image": "https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=600&q=80",
+      "sortOrder": 1
+    },
+    {
+      "name": "Rudraksha",
+      "slug": "rudraksha",
+      "description": "Sacred rudraksha beads and malas",
+      "image": "https://images.unsplash.com/photo-1602928321679-560bb453f190?w=600&q=80",
+      "sortOrder": 2
+    },
+    {
+      "name": "Bracelets",
+      "slug": "bracelets",
+      "description": "Spiritual & crystal bracelets",
+      "image": "https://images.unsplash.com/photo-1611591437281-460bfbe1220a?w=600&q=80",
+      "sortOrder": 3
+    },
+    {
+      "name": "Yantras",
+      "slug": "yantras",
+      "description": "Energized metal yantras",
+      "image": "https://images.unsplash.com/photo-1604608672516-f1b9b1d37076?w=600&q=80",
+      "sortOrder": 4
+    },
+    {
+      "name": "Puja Kits",
+      "slug": "puja-kits",
+      "description": "Complete ritual kits",
+      "image": "https://images.unsplash.com/photo-1604608672516-f1b9b1d37076?w=600&q=80",
+      "sortOrder": 5
+    },
+    {
+      "name": "Books",
+      "slug": "books",
+      "description": "Astrology & spirituality titles",
+      "image": "https://images.unsplash.com/photo-1544947950-fa07a98d237f?w=600&q=80",
+      "sortOrder": 6
+    },
+    {
+      "name": "Crystals",
+      "slug": "crystals",
+      "description": "Healing crystals & clusters",
+      "image": "https://images.unsplash.com/photo-1518611012118-696072aa579a?w=600&q=80",
+      "sortOrder": 7
+    }
+  ],
+  "products": [
+    {
+      "name": "Yellow Sapphire (Pukhraj)",
+      "slug": "yellow-sapphire-pukhraj",
+      "categorySlug": "gemstones",
+      "description": "Certified natural yellow sapphire recommended for Jupiter remedies. Includes authenticity card and jewelry pouch.",
+      "shortDescription": "Natural Pukhraj · Jupiter remedy",
+      "price": 4999,
+      "compareAtPrice": 6999,
+      "stock": 25,
+      "sku": "GEM-PUKH-01",
+      "isFeatured": true,
+      "tags": ["jupiter", "gemstone", "pukhraj"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "Blue Sapphire (Neelam)",
+      "slug": "blue-sapphire-neelam",
+      "categorySlug": "gemstones",
+      "description": "Natural blue sapphire for Saturn-related remedies. Lab-tested clarity with smooth cushion cut.",
+      "shortDescription": "Natural Neelam · Saturn remedy",
+      "price": 7999,
+      "compareAtPrice": 9999,
+      "stock": 12,
+      "sku": "GEM-NEEL-01",
+      "isFeatured": true,
+      "tags": ["saturn", "neelam", "gemstone"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "Emerald (Panna)",
+      "slug": "emerald-panna",
+      "categorySlug": "gemstones",
+      "description": "Vivid green emerald associated with Mercury — clarity of speech and commerce.",
+      "shortDescription": "Natural Panna · Mercury",
+      "price": 5499,
+      "compareAtPrice": 7200,
+      "stock": 18,
+      "sku": "GEM-PANN-01",
+      "isFeatured": false,
+      "tags": ["mercury", "panna"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "5 Mukhi Rudraksha Mala",
+      "slug": "5-mukhi-rudraksha-mala",
+      "categorySlug": "rudraksha",
+      "description": "Traditional 108-bead five mukhi rudraksha mala. Suitable for daily japa and meditation.",
+      "shortDescription": "108-bead sacred mala",
+      "price": 899,
+      "compareAtPrice": 1299,
+      "stock": 100,
+      "sku": "RUD-5M-01",
+      "isFeatured": true,
+      "tags": ["mala", "rudraksha", "meditation"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1602928321679-560bb453f190?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "1 Mukhi Rudraksha (Collector)",
+      "slug": "1-mukhi-rudraksha-collector",
+      "categorySlug": "rudraksha",
+      "description": "Rare single-mukhi rudraksha pendant with silver capping. Comes with energization certificate.",
+      "shortDescription": "Rare 1 mukhi pendant",
+      "price": 12999,
+      "compareAtPrice": 15999,
+      "stock": 5,
+      "sku": "RUD-1M-01",
+      "isFeatured": true,
+      "tags": ["rare", "rudraksha", "pendant"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1611652022419-a9419f74343d?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "Tiger Eye Protection Bracelet",
+      "slug": "tiger-eye-protection-bracelet",
+      "categorySlug": "bracelets",
+      "description": "8mm tiger eye beads for grounding and courage. Elastic fit, unisex design.",
+      "shortDescription": "Grounding crystal bracelet",
+      "price": 499,
+      "compareAtPrice": 799,
+      "stock": 80,
+      "sku": "BRA-TIG-01",
+      "isFeatured": true,
+      "tags": ["bracelet", "protection"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1611591437281-460bfbe1220a?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "7 Chakra Healing Bracelet",
+      "slug": "7-chakra-healing-bracelet",
+      "categorySlug": "bracelets",
+      "description": "Color-matched stones for all seven chakras — balance, calm, and mindful wear.",
+      "shortDescription": "Full chakra set bracelet",
+      "price": 699,
+      "compareAtPrice": 999,
+      "stock": 60,
+      "sku": "BRA-CHK-01",
+      "isFeatured": false,
+      "tags": ["chakra", "bracelet"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1573408301185-9146fe634ad0?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "Shree Yantra – Brass",
+      "slug": "shree-yantra-brass",
+      "categorySlug": "yantras",
+      "description": "Handcrafted brass Shree Yantra for prosperity and harmony in home/office spaces.",
+      "shortDescription": "Prosperity yantra",
+      "price": 1499,
+      "compareAtPrice": 1999,
+      "stock": 40,
+      "sku": "YAN-SHREE-01",
+      "isFeatured": true,
+      "tags": ["yantra", "prosperity"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1604608672516-f1b9b1d37076?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "Navagraha Yantra Plate",
+      "slug": "navagraha-yantra-plate",
+      "categorySlug": "yantras",
+      "description": "Copper Navagraha yantra plate for planetary harmony. Includes placement guide.",
+      "shortDescription": "Nine planets copper plate",
+      "price": 999,
+      "compareAtPrice": 1499,
+      "stock": 35,
+      "sku": "YAN-NAV-01",
+      "isFeatured": false,
+      "tags": ["navagraha", "yantra"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "Griha Shanti Puja Kit",
+      "slug": "griha-shanti-puja-kit",
+      "categorySlug": "puja-kits",
+      "description": "Complete home peace puja kit with incense, diya, kumkum, roli, rice, and instruction booklet.",
+      "shortDescription": "Home peace ritual kit",
+      "price": 799,
+      "compareAtPrice": 1199,
+      "stock": 50,
+      "sku": "PUJ-GRI-01",
+      "isFeatured": true,
+      "tags": ["puja", "home"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1604608672516-f1b9b1d37076?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "Navgraha Shanti Kit",
+      "slug": "navgraha-shanti-kit",
+      "categorySlug": "puja-kits",
+      "description": "Planetary peace kit with colored threads, ghee diya, and mantra cards.",
+      "shortDescription": "Planetary remedy kit",
+      "price": 1199,
+      "compareAtPrice": 1599,
+      "stock": 30,
+      "sku": "PUJ-NAV-01",
+      "isFeatured": false,
+      "tags": ["puja", "navagraha"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "Brihat Parashara Hora Shastra",
+      "slug": "brihat-parashara-hora-shastra",
+      "categorySlug": "books",
+      "description": "Classic Vedic astrology text — recommended starter for serious students of Jyotish.",
+      "shortDescription": "Classic Jyotish text",
+      "price": 649,
+      "compareAtPrice": 899,
+      "stock": 45,
+      "sku": "BOK-BPHS-01",
+      "isFeatured": false,
+      "tags": ["book", "vedic"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1544947950-fa07a98d237f?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "Everyday Astrology Handbook",
+      "slug": "everyday-astrology-handbook",
+      "categorySlug": "books",
+      "description": "Simple, practical guide to reading your own chart, dashas, and daily timings.",
+      "shortDescription": "Beginner-friendly guide",
+      "price": 399,
+      "compareAtPrice": 599,
+      "stock": 70,
+      "sku": "BOK-EAH-01",
+      "isFeatured": true,
+      "tags": ["book", "beginner"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1512820790803-83ca734da794?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "Amethyst Cluster",
+      "slug": "amethyst-cluster",
+      "categorySlug": "crystals",
+      "description": "Natural amethyst cluster for calm focus and sleep spaces. 200–300g approx.",
+      "shortDescription": "Calming purple crystal",
+      "price": 1299,
+      "compareAtPrice": 1799,
+      "stock": 22,
+      "sku": "CRY-AME-01",
+      "isFeatured": true,
+      "tags": ["crystal", "amethyst", "calm"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1518611012118-696072aa579a?w=800&q=80", "isPrimary": true }
+      ]
+    },
+    {
+      "name": "Clear Quartz Tower",
+      "slug": "clear-quartz-tower",
+      "categorySlug": "crystals",
+      "description": "Hand-polished clear quartz tower for clarity and energy amplification.",
+      "shortDescription": "Clarity crystal tower",
+      "price": 899,
+      "compareAtPrice": 1199,
+      "stock": 28,
+      "sku": "CRY-CQT-01",
+      "isFeatured": false,
+      "tags": ["crystal", "quartz"],
+      "images": [
+        { "url": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800&q=80", "isPrimary": true }
+      ]
+    }
+  ],
+  "coupons": [
+    {
+      "code": "WELCOME100",
+      "description": "₹100 off on orders above ₹499",
+      "type": "fixed",
+      "value": 100,
+      "minOrderAmount": 499,
+      "usageLimit": 1000,
+      "perUserLimit": 1,
+      "applicableTo": "products",
+      "daysValid": 90
+    },
+    {
+      "code": "STARS15",
+      "description": "15% off store, max ₹500",
+      "type": "percentage",
+      "value": 15,
+      "minOrderAmount": 999,
+      "maxDiscount": 500,
+      "usageLimit": 500,
+      "perUserLimit": 2,
+      "applicableTo": "products",
+      "daysValid": 60
+    },
+    {
+      "code": "WALLET50",
+      "description": "Bonus style coupon (demo listing)",
+      "type": "wallet_bonus",
+      "value": 50,
+      "minOrderAmount": 0,
+      "usageLimit": 200,
+      "perUserLimit": 1,
+      "applicableTo": "wallet",
+      "daysValid": 30
+    }
+  ],
+  "banners": [
+    {
+      "title": "Talk to the Stars",
+      "subtitle": "AI + expert astrologers · instant guidance from your wallet",
+      "image": "https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=1600&q=80",
+      "link": "/chat/ai",
+      "placement": "home_hero",
+      "sortOrder": 0
+    },
+    {
+      "title": "Sacred Store",
+      "subtitle": "Gemstones, rudraksha, yantras & puja kits",
+      "image": "https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&q=80",
+      "link": "/store",
+      "placement": "home_mid",
+      "sortOrder": 1
+    },
+    {
+      "title": "Live Consultations",
+      "subtitle": "Chat with verified astrologers per minute",
+      "image": "https://images.unsplash.com/photo-1532693322450-2cb5c511067d?w=1200&q=80",
+      "link": "/astrologers",
+      "placement": "chat_promo",
+      "sortOrder": 2
+    }
+  ],
+  "blogs": [
+    {
+      "title": "How to Read Your Daily Horoscope with Clarity",
+      "slug": "how-to-read-daily-horoscope",
+      "excerpt": "Skip vague readings — use intention, timing, and one focus area.",
+      "content": "A useful horoscope is a compass, not a sentence. Start with one life area (career or relationships), note the moon’s emotional cue, then act on one small alignment that day. Pair AI chat with your own reflection for best results.",
+      "coverImage": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=1000&q=80",
+      "tags": ["horoscope", "daily"],
+      "category": "Guidance",
+      "status": "published"
+    },
+    {
+      "title": "Choosing a Vedic Gemstone Safely",
+      "slug": "choosing-vedic-gemstone-safely",
+      "excerpt": "Always verify authenticity and suitability before wearing remedies.",
+      "content": "Gemstones work as supporting remedies, not guarantees. Prefer certified stones, confirm planetary suitability with a consultant, and observe a trial period. Never force a stone that feels energetically heavy.",
+      "coverImage": "https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1000&q=80",
+      "tags": ["gemstones", "remedies"],
+      "category": "Store",
+      "status": "published"
+    },
+    {
+      "title": "What to Expect in an AstroVerse Chat Session",
+      "slug": "what-to-expect-in-chat-session",
+      "excerpt": "Minute billing, live timers, and how wallet deductions work.",
+      "content": "When you start AI or human chat, the first minute is charged up front. Every following minute debits your wallet. If balance runs out, the session ends automatically and a full transcript is saved in your history.",
+      "coverImage": "https://images.unsplash.com/photo-1516321497487-e288fb19713f?w=1000&q=80",
+      "tags": ["chat", "wallet"],
+      "category": "Product",
+      "status": "published"
+    }
+  ],
+  "chatWalkthrough": {
+    "aiChat": [
+      "1. Login as demo.customer@astroverse.com / Demo@12345",
+      "2. Open Wallet — balance should be ~₹2500 (pre-seeded)",
+      "3. Go to AI Chat → Start AI Chat",
+      "4. First minute is charged immediately; timer ticks every second",
+      "5. Send a message about career or birth chart",
+      "6. End chat anytime — history appears on Dashboard"
+    ],
+    "humanChat": [
+      "1. Keep customer logged in (wallet funded)",
+      "2. Open /astrologers — Acharya Rajesh & Dr. Meera are online",
+      "3. Click Request Chat on an online astrologer",
+      "4. In another browser/incognito: login as rajesh.astro@astroverse.com / Demo@12345",
+      "5. Open Astrologer Studio → Accept the pending request",
+      "6. Chat live — both see timer; minute billing debits customer wallet",
+      "7. End chat → earnings credited to astrologer wallet (minus platform commission)"
+    ],
+    "storeCheckout": [
+      "1. Browse /store and open any product",
+      "2. Add to cart → Cart → fill address",
+      "3. Pay with Wallet (optional coupon WELCOME100 if order ≥ ₹499)",
+      "4. Track order under Dashboard / order history API"
+    ]
+  }
+}
