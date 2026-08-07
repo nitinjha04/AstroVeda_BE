@@ -299,6 +299,14 @@ const seedDatabase = async () => {
     } catch (e) {
       logger.error(`AI Astrologer seed error: ${e.message}`);
     }
+
+    try {
+      const poojaService = require('../services/pooja.service');
+      const n = await poojaService.seedPoojas();
+      logger.info(`Poojas seeded: ${n}`);
+    } catch (e) {
+      logger.error(`Pooja seed error: ${e.message}`);
+    }
   } catch (err) {
     logger.error(`Seed error: ${err.message}`);
     logger.error(err.stack);

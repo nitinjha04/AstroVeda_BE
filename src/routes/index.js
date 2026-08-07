@@ -124,6 +124,61 @@ router.get(
 );
 
 router.get(
+  '/public/poojas',
+  asyncHandler(async (req, res) => {
+    const poojaService = require('../services/pooja.service');
+    const data = await poojaService.listPoojas({
+      search: req.query.search,
+      category: req.query.category,
+      page: req.query.page,
+      limit: req.query.limit,
+    });
+    return success(res, { data: data.items, meta: data.meta });
+  })
+);
+
+router.get(
+  '/public/poojas/:slug',
+  asyncHandler(async (req, res) => {
+    const poojaService = require('../services/pooja.service');
+    const data = await poojaService.getPoojaBySlug(req.params.slug);
+    return success(res, { data });
+  })
+);
+
+router.post(
+  '/public/contact',
+  asyncHandler(async (req, res) => {
+    const { ContactMessage } = require('../models');
+    const AppError = require('../utils/AppError');
+    const name = String(req.body?.name || '').trim();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const phone = String(req.body?.phone || '').trim();
+    const topic = String(req.body?.topic || 'general').trim().slice(0, 40);
+    const message = String(req.body?.message || '').trim();
+
+    if (!name || name.length < 2) throw new AppError('Name is required', 400);
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new AppError('Valid email is required', 400);
+    if (!message || message.length < 10) throw new AppError('Message is too short', 400);
+    if (message.length > 4000) throw new AppError('Message is too long', 400);
+
+    const doc = await ContactMessage.create({
+      name,
+      email,
+      phone,
+      topic,
+      message,
+      user: req.user?._id || null,
+    });
+
+    return success(res, {
+      message: 'Message received',
+      data: { id: doc._id, createdAt: doc.createdAt },
+    });
+  })
+);
+
+router.get(
   '/public/demo',
   asyncHandler(async (req, res) => {
     const demoPath = path.join(__dirname, '../data/demo-data.json');

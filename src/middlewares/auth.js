@@ -1,15 +1,20 @@
 const { verifyAccessToken } = require('../utils/tokens');
+const { extractAccessToken } = require('../utils/authCookies');
 const AppError = require('../utils/AppError');
 const { User } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 
+/**
+ * Dual authentication:
+ * - Authorization: Bearer <accessToken>  (from FE localStorage)
+ * - accessToken httpOnly cookie            (same or cross-site with credentials)
+ */
 const authenticate = asyncHandler(async (req, res, next) => {
-  const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) {
-    throw new AppError('Authentication required', 401);
+  const token = extractAccessToken(req);
+  if (!token) {
+    throw new AppError('Authentication required. Send Authorization: Bearer <token> or accessToken cookie.', 401);
   }
 
-  const token = header.split(' ')[1];
   let decoded;
   try {
     decoded = verifyAccessToken(token);
@@ -24,20 +29,21 @@ const authenticate = asyncHandler(async (req, res, next) => {
 
   req.user = user;
   req.tokenPayload = decoded;
+  req.accessToken = token;
   next();
 });
 
 const optionalAuth = asyncHandler(async (req, res, next) => {
-  const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) return next();
+  const token = extractAccessToken(req);
+  if (!token) return next();
 
   try {
-    const token = header.split(' ')[1];
     const decoded = verifyAccessToken(token);
     const user = await User.findById(decoded.id);
     if (user && user.isActive && !user.isBlocked) {
       req.user = user;
       req.tokenPayload = decoded;
+      req.accessToken = token;
     }
   } catch {
     // ignore invalid token for optional auth

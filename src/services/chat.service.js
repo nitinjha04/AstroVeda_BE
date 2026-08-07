@@ -283,16 +283,27 @@ const generateAiReplyForRoom = async (chatRoomId, userId, content) => {
   return aiReply;
 };
 
-/** End every active / pending chat for a customer (used after page refresh) */
-const endActiveChatsForUser = async (userId, { io = null, endReason = 'Session ended (page closed or refreshed)' } = {}) => {
-  const rooms = await ChatRoom.find({
+/** End every active / pending chat for a customer (page leave / refresh / disconnect) */
+const endActiveChatsForUser = async (
+  userId,
+  {
+    io = null,
+    endReason = 'Session ended (page closed or refreshed)',
+    types = null,
+  } = {}
+) => {
+  const filter = {
     customer: userId,
     status: { $in: [CHAT_STATUS.ACTIVE, CHAT_STATUS.PENDING] },
-  });
+  };
+  if (types && Array.isArray(types) && types.length) {
+    filter.type = { $in: types };
+  }
+
+  const rooms = await ChatRoom.find(filter);
 
   const ended = [];
   for (const room of rooms) {
-    // only end AI by default on refresh, also end pending human requests
     const result = await endChat(room._id, {
       endedBy: 'system',
       endReason,

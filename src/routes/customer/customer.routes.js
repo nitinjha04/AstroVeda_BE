@@ -3,6 +3,7 @@ const walletController = require('../../controllers/customer/wallet.controller')
 const chatController = require('../../controllers/customer/chat.controller');
 const storeController = require('../../controllers/customer/store.controller');
 const profileController = require('../../controllers/customer/profile.controller');
+const poojaController = require('../../controllers/customer/pooja.controller');
 const notificationService = require('../../services/notification.service');
 const { authenticate } = require('../../middlewares/auth');
 const { authorize } = require('../../middlewares/authorize');
@@ -57,6 +58,14 @@ router.post('/checkout', storeController.checkout);
 router.get('/orders', storeController.myOrders);
 router.get('/wishlist', storeController.getWishlist);
 router.post('/wishlist', storeController.toggleWishlist);
+
+// Pooja bookings
+router.get('/poojas', poojaController.list);
+router.get('/poojas/bookings', poojaController.myBookings);
+router.get('/poojas/bookings/:id', poojaController.myBooking);
+router.post('/poojas/bookings', poojaController.book);
+router.post('/poojas/bookings/:id/cancel', poojaController.cancel);
+router.get('/poojas/:slug', poojaController.getBySlug);
 
 // Notifications
 router.get(

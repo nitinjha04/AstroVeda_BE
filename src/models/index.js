@@ -21,4 +21,7 @@ module.exports = {
   Cart: require('./Cart'),
   AuditLog: require('./AuditLog'),
   AIAstrologer: require('./AIAstrologer'),
+  Pooja: require('./Pooja'),
+  PoojaBooking: require('./PoojaBooking'),
+  ContactMessage: require('./ContactMessage'),
 };

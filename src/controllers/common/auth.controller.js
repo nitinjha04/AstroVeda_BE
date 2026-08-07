@@ -1,15 +1,45 @@
 const authService = require('../../services/auth.service');
 const asyncHandler = require('../../utils/asyncHandler');
 const { success, created } = require('../../utils/apiResponse');
+const { setAuthCookies, clearAuthCookies, extractRefreshToken } = require('../../utils/authCookies');
+
+/** Attach tokens in JSON body AND set httpOnly cookies (dual strategy). */
+function respondWithAuth(res, { statusFn, message, data }) {
+  const { user, accessToken, refreshToken, ...rest } = data || {};
+  if (accessToken) {
+    setAuthCookies(res, { accessToken, refreshToken });
+  }
+  return statusFn(res, {
+    message,
+    data: {
+      user,
+      accessToken,
+      refreshToken,
+      ...rest,
+      // nested form for clients that expect data.tokens
+      tokens: accessToken
+        ? { accessToken, refreshToken }
+        : undefined,
+    },
+  });
+}
 
 const register = asyncHandler(async (req, res) => {
   const data = await authService.register(req.body);
-  return created(res, { message: 'Registration successful', data });
+  return respondWithAuth(res, {
+    statusFn: created,
+    message: 'Registration successful',
+    data,
+  });
 });
 
 const login = asyncHandler(async (req, res) => {
   const data = await authService.login(req.body);
-  return success(res, { message: 'Login successful', data });
+  return respondWithAuth(res, {
+    statusFn: success,
+    message: 'Login successful',
+    data,
+  });
 });
 
 const sendOtp = asyncHandler(async (req, res) => {
@@ -19,21 +49,38 @@ const sendOtp = asyncHandler(async (req, res) => {
 
 const verifyOtp = asyncHandler(async (req, res) => {
   const data = await authService.verifyOtp(req.body);
-  return success(res, { message: 'OTP verified', data });
+  return respondWithAuth(res, {
+    statusFn: success,
+    message: 'OTP verified',
+    data,
+  });
 });
 
 const googleLogin = asyncHandler(async (req, res) => {
   const data = await authService.googleLogin(req.body.idToken);
-  return success(res, { message: 'Google login successful', data });
+  return respondWithAuth(res, {
+    statusFn: success,
+    message: 'Google login successful',
+    data,
+  });
 });
 
 const refresh = asyncHandler(async (req, res) => {
-  const data = await authService.refreshTokens(req.body.refreshToken);
-  return success(res, { message: 'Token refreshed', data });
+  const refreshToken = extractRefreshToken(req);
+  const data = await authService.refreshTokens(refreshToken);
+  return respondWithAuth(res, {
+    statusFn: success,
+    message: 'Token refreshed',
+    data,
+  });
 });
 
 const logout = asyncHandler(async (req, res) => {
-  await authService.logout(req.user._id, req.body.refreshToken);
+  const refreshToken = extractRefreshToken(req);
+  if (req.user?._id) {
+    await authService.logout(req.user._id, refreshToken);
+  }
+  clearAuthCookies(res);
   return success(res, { message: 'Logged out' });
 });
 
@@ -44,6 +91,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
 
 const resetPassword = asyncHandler(async (req, res) => {
   const data = await authService.resetPassword(req.body);
+  clearAuthCookies(res);
   return success(res, { message: data.message });
 });
 

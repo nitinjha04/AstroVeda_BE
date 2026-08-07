@@ -177,6 +177,10 @@ const googleLogin = async (idToken) => {
 };
 
 const refreshTokens = async (refreshToken) => {
+  if (!refreshToken) {
+    throw new AppError('Refresh token required (body.refreshToken or refreshToken cookie)', 400);
+  }
+
   const { verifyRefreshToken } = require('../utils/tokens');
   let decoded;
   try {

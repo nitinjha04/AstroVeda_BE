@@ -1,6 +1,6 @@
 const express = require('express');
 const authController = require('../../controllers/common/auth.controller');
-const { authenticate } = require('../../middlewares/auth');
+const { authenticate, optionalAuth } = require('../../middlewares/auth');
 const validate = require('../../middlewares/validate');
 const { authLimiter, otpLimiter } = require('../../middlewares/rateLimiter');
 const {
@@ -20,7 +20,8 @@ router.post('/google', authLimiter, authController.googleLogin);
 router.post('/refresh', authController.refresh);
 router.post('/forgot-password', otpLimiter, authController.forgotPassword);
 router.post('/reset-password', authLimiter, authController.resetPassword);
-router.post('/logout', authenticate, authController.logout);
+// optionalAuth so cookie-only sessions can still clear tokens even if access JWT briefly fails
+router.post('/logout', optionalAuth, authController.logout);
 router.get('/me', authenticate, authController.me);
 
 module.exports = router;

@@ -2,15 +2,20 @@ const { verifyAccessToken } = require('../utils/tokens');
 const { User, ChatRoom } = require('../models');
 const chatService = require('../services/chat.service');
 const logger = require('../utils/logger');
-const { CHAT_STATUS } = require('../utils/constants');
+const { CHAT_STATUS, CHAT_TYPE } = require('../utils/constants');
 
 /** Active chat billing timers: chatRoomId -> interval */
 const billingTimers = new Map();
 
+/** userId -> timeout handle after disconnect (grace before ending sessions) */
+const disconnectGraceTimers = new Map();
+
+/** Grace so brief reconnect flickers do not end paid sessions instantly */
+const DISCONNECT_GRACE_MS = 8_000;
+
 const startBillingTimer = (io, chatRoomId) => {
   if (billingTimers.has(chatRoomId)) return;
 
-  // Emit second-level timer ticks; debit every 60s
   let seconds = 0;
   const interval = setInterval(async () => {
     seconds += 1;
@@ -51,10 +56,54 @@ const stopBillingTimer = (chatRoomId) => {
   }
 };
 
+const clearDisconnectGrace = (userId) => {
+  const t = disconnectGraceTimers.get(userId);
+  if (t) {
+    clearTimeout(t);
+    disconnectGraceTimers.delete(userId);
+  }
+};
+
+const scheduleEndOnDisconnect = (io, userId, reason) => {
+  clearDisconnectGrace(userId);
+  const timer = setTimeout(async () => {
+    disconnectGraceTimers.delete(userId);
+    try {
+      const remaining = await io.in(`user:${userId}`).fetchSockets();
+      if (remaining.length > 0) {
+        logger.debug(`Skip auto-end for ${userId}: socket reconnected`);
+        return;
+      }
+
+      const ended = await chatService.endActiveChatsForUser(userId, {
+        io,
+        endReason: reason || 'Socket disconnected — session ended automatically',
+        types: [CHAT_TYPE.AI],
+      });
+      if (ended?.length) {
+        logger.info(`Auto-ended ${ended.length} AI chat(s) after socket disconnect user=${userId}`);
+        for (const room of ended) {
+          stopBillingTimer(String(room._id));
+          io.to(`user:${userId}`).emit('chat:auto-ended', {
+            chatRoomId: room._id,
+            reason: room.endReason,
+          });
+        }
+      }
+    } catch (err) {
+      logger.error(`Disconnect auto-end failed for ${userId}: ${err.message}`);
+    }
+  }, DISCONNECT_GRACE_MS);
+  disconnectGraceTimers.set(userId, timer);
+};
+
 const initSockets = (io) => {
   io.use(async (socket, next) => {
     try {
-      const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+      const token =
+        socket.handshake.auth?.token ||
+        socket.handshake.query?.token ||
+        (socket.handshake.headers?.authorization || '').replace(/^Bearer\s+/i, '');
       if (!token) return next(new Error('Authentication required'));
       const decoded = verifyAccessToken(token);
       const user = await User.findById(decoded.id);
@@ -69,6 +118,8 @@ const initSockets = (io) => {
   io.on('connection', (socket) => {
     const userId = socket.user._id.toString();
     socket.join(`user:${userId}`);
+    socket.data.activeChatRoomId = null;
+    clearDisconnectGrace(userId);
     logger.debug(`Socket connected: ${userId}`);
 
     socket.on('chat:join', async ({ chatRoomId }) => {
@@ -81,6 +132,7 @@ const initSockets = (io) => {
         if (!allowed) return;
 
         socket.join(`chat:${chatRoomId}`);
+        socket.data.activeChatRoomId = String(chatRoomId);
         socket.emit('chat:joined', { chatRoomId });
 
         if (room.status === CHAT_STATUS.ACTIVE) {
@@ -91,8 +143,30 @@ const initSockets = (io) => {
       }
     });
 
+    socket.on('presence:active', async ({ chatRoomId }) => {
+      try {
+        const room = await ChatRoom.findById(chatRoomId);
+        if (!room || room.customer.toString() !== userId) return;
+        if (room.status !== CHAT_STATUS.ACTIVE) return;
+        socket.data.activeChatRoomId = String(chatRoomId);
+        socket.join(`chat:${chatRoomId}`);
+        startBillingTimer(io, chatRoomId);
+      } catch (err) {
+        logger.error(`presence:active error: ${err.message}`);
+      }
+    });
+
+    socket.on('presence:idle', ({ chatRoomId }) => {
+      if (chatRoomId && String(socket.data.activeChatRoomId) === String(chatRoomId)) {
+        socket.data.activeChatRoomId = null;
+      }
+    });
+
     socket.on('chat:leave', ({ chatRoomId }) => {
       socket.leave(`chat:${chatRoomId}`);
+      if (String(socket.data.activeChatRoomId) === String(chatRoomId)) {
+        socket.data.activeChatRoomId = null;
+      }
     });
 
     socket.on('message:send', async ({ chatRoomId, content, contentType }) => {
@@ -112,7 +186,6 @@ const initSockets = (io) => {
           },
         });
 
-        // Customer message already emitted in onCustomerMessage when callbacks used
         if (result.aiReply) {
           io.to(`chat:${chatRoomId}`).emit('message:new', result.aiReply);
           io.to(`chat:${chatRoomId}`).emit('ai:done', { chatRoomId });
@@ -147,13 +220,13 @@ const initSockets = (io) => {
 
     socket.on('chat:end', async ({ chatRoomId, reason }) => {
       try {
-        // Prefer ending without inventing a second path if HTTP already closed it
         await chatService.endChat(chatRoomId, {
           endedBy: socket.user.role === 'astrologer' ? 'astrologer' : 'customer',
           endReason: reason || 'Ended by user',
           io,
         });
         stopBillingTimer(chatRoomId);
+        socket.data.activeChatRoomId = null;
       } catch (err) {
         socket.emit('error:message', { message: err.message });
       }
@@ -163,12 +236,19 @@ const initSockets = (io) => {
       io.to(`user:${astrologerUserId}`).emit('chat:request', { chatRoomId });
     });
 
-    socket.on('disconnect', () => {
-      logger.debug(`Socket disconnected: ${userId}`);
+    socket.on('disconnect', (reason) => {
+      logger.debug(`Socket disconnected: ${userId} (${reason})`);
+      // Only auto-end for customers (AI billing sessions)
+      if (socket.user.role === 'customer' || socket.user.role === 'admin') {
+        scheduleEndOnDisconnect(
+          io,
+          userId,
+          `Network/socket disconnected (${reason}) — chat ended automatically`
+        );
+      }
     });
   });
 
-  // Expose helpers for HTTP controllers
   io.startBillingTimer = (chatRoomId) => startBillingTimer(io, chatRoomId);
   io.stopBillingTimer = stopBillingTimer;
 };
