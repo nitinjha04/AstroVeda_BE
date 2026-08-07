@@ -1,19 +1,25 @@
 require('dotenv').config();
 
+/** Comma-separated env list → unique origin URLs (no trailing slash) */
 const parseList = (value, fallback = []) => {
   if (!value || !String(value).trim()) return fallback;
   return String(value)
     .split(',')
-    .map((s) => s.trim())
+    .map((s) => s.trim().replace(/\/+$/, ''))
     .filter(Boolean);
 };
 
-const defaultOrigins = [
-  process.env.CLIENT_URL || 'http://localhost:5173',
+const localDevOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
   'http://127.0.0.1:5173',
 ];
+
+/**
+ * CLIENT_URL may be one URL or many, comma-separated, e.g.
+ * https://astrovedaverse.vercel.app,https://www.astrovedaverse.vercel.app
+ */
+const clientOrigins = parseList(process.env.CLIENT_URL, ['http://localhost:5173']);
 
 const config = {
   env: process.env.NODE_ENV || 'development',
@@ -23,14 +29,14 @@ const config = {
   host: process.env.HOST || '0.0.0.0',
   appName: process.env.APP_NAME || 'AstroVerse',
   appUrl: process.env.APP_URL || 'http://localhost:5000',
-  clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
-  /** Comma-separated extra origins (Hostinger domain, www, previews) */
+  /** Primary frontend URL (first entry in CLIENT_URL) */
+  clientUrl: clientOrigins[0],
+  /**
+   * Allowed browser origins for CORS + Socket.io.
+   * Sources: CLIENT_URL, CORS_ORIGINS, plus local dev defaults.
+   */
   corsOrigins: [
-    ...new Set([
-      ...defaultOrigins,
-      ...parseList(process.env.CORS_ORIGINS),
-      ...parseList(process.env.CLIENT_URL),
-    ]),
+    ...new Set([...clientOrigins, ...localDevOrigins, ...parseList(process.env.CORS_ORIGINS)]),
   ],
 
   mongodb: {
