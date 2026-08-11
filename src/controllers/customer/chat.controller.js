@@ -5,6 +5,11 @@ const { success, created } = require('../../utils/apiResponse');
 const startAi = asyncHandler(async (req, res) => {
   const aiAstrologerId = req.body.aiAstrologerId || req.body.astrologerId;
   const data = await chatService.startAiChat(req.user._id, aiAstrologerId);
+  const io = req.app.get('io');
+  const roomId = data.room?._id || data.room?.id;
+  if (io?.startBillingTimer && roomId) {
+    io.startBillingTimer(String(roomId));
+  }
   return created(res, { message: 'AI chat started', data });
 });
 
@@ -75,6 +80,11 @@ const openAi = asyncHandler(async (req, res) => {
 /** Continue an ended AI chat (starts billing again) */
 const resumeAi = asyncHandler(async (req, res) => {
   const room = await chatService.resumeAiChat(req.user._id, req.params.id);
+  const io = req.app.get('io');
+  const roomId = room?._id || room?.id;
+  if (io?.startBillingTimer && roomId) {
+    io.startBillingTimer(String(roomId));
+  }
   return success(res, { message: 'Chat continued', data: room });
 });
 

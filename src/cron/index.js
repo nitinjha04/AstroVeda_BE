@@ -29,11 +29,11 @@ const startCronJobs = (io) => {
         }
       }
 
-      // Safety billing: active rooms without recent deduction
+      // Safety billing: active rooms due for next minute (server-driven, even without sockets)
       const stale = await ChatRoom.find({
         status: CHAT_STATUS.ACTIVE,
-        lastDeductionAt: { $lt: new Date(Date.now() - 65 * 1000) },
-      });
+        lastDeductionAt: { $lt: new Date(Date.now() - 60 * 1000) },
+      }).limit(100);
       for (const room of stale) {
         await chatService.deductMinute(room._id, io);
       }

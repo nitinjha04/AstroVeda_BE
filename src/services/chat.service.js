@@ -329,11 +329,29 @@ const deductMinute = async (chatRoomId, io = null) => {
 
   const wallet = await walletService.getBalance(room.customer);
   if (!wallet.canAfford(room.pricePerMinute)) {
-    return endChat(chatRoomId, {
+    const ended = await endChat(chatRoomId, {
       endedBy: 'wallet',
       endReason: 'Insufficient wallet balance',
       io,
     });
+    if (io) {
+      const bal = await walletService.getBalance(room.customer).catch(() => wallet);
+      const payload = {
+        chatRoomId: room._id,
+        reason: 'Insufficient wallet balance',
+        endedBy: 'wallet',
+        balance: bal?.balance ?? wallet.balance,
+        billedMinutes: ended?.billedMinutes,
+        totalCharged: ended?.totalCharged,
+      };
+      io.to(`chat:${room._id}`).emit('chat:ended-wallet', payload);
+      io.to(`user:${room.customer}`).emit('chat:ended-wallet', payload);
+      io.to(`user:${room.customer}`).emit('wallet:update', {
+        balance: bal?.balance ?? wallet.balance,
+        chatRoomId: room._id,
+      });
+    }
+    return ended;
   }
 
   const { wallet: updatedWallet } = await walletService.debit({
@@ -358,7 +376,19 @@ const deductMinute = async (chatRoomId, io = null) => {
       billedMinutes: room.billedMinutes,
       totalCharged: room.totalCharged,
     });
+    io.to(`user:${room.customer}`).emit('wallet:update', {
+      balance: updatedWallet.balance,
+      chatRoomId: room._id,
+      billedMinutes: room.billedMinutes,
+      totalCharged: room.totalCharged,
+    });
     io.to(`chat:${room._id}`).emit('timer:tick', {
+      chatRoomId: room._id,
+      durationSeconds: room.durationSeconds,
+      billedMinutes: room.billedMinutes,
+      pricePerMinute: room.pricePerMinute,
+    });
+    io.to(`user:${room.customer}`).emit('timer:tick', {
       chatRoomId: room._id,
       durationSeconds: room.durationSeconds,
       billedMinutes: room.billedMinutes,
@@ -448,14 +478,19 @@ const endChat = async (chatRoomId, { endedBy = 'system', endReason = '', io = nu
   }
 
   if (io) {
-    io.to(`chat:${room._id}`).emit('chat:end', {
+    const payload = {
       chatRoomId: room._id,
       endedBy,
       endReason: endReason || '',
       billedMinutes: room.billedMinutes,
       totalCharged: room.totalCharged,
       silent: endedBy === 'customer' || endedBy === 'system',
-    });
+    };
+    io.to(`chat:${room._id}`).emit('chat:end', payload);
+    io.to(`user:${room.customer}`).emit('chat:end', payload);
+    if (typeof io.stopBillingTimer === 'function') {
+      io.stopBillingTimer(String(room._id));
+    }
   }
 
   logger.info(`Chat ended ${room._id} by ${endedBy}: ${endReason}`);

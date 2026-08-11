@@ -99,6 +99,8 @@ const config = {
     razorpay: {
       keyId: process.env.RAZORPAY_KEY_ID,
       keySecret: process.env.RAZORPAY_KEY_SECRET,
+      /** Dashboard → Webhooks → Secret (falls back to key secret if unset) */
+      webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_KEY_SECRET,
     },
     stripe: {
       secretKey: process.env.STRIPE_SECRET_KEY,
@@ -125,7 +127,7 @@ const config = {
 
   wallet: {
     defaultAiPricePerMinute: parseFloat(process.env.DEFAULT_AI_PRICE_PER_MINUTE) || 5,
-    minRecharge: parseFloat(process.env.MIN_WALLET_RECHARGE) || 50,
+    minRecharge: parseFloat(process.env.MIN_WALLET_RECHARGE) || 1,
     maxRecharge: parseFloat(process.env.MAX_WALLET_RECHARGE) || 50000,
     platformCommissionPercent: parseFloat(process.env.PLATFORM_COMMISSION_PERCENT) || 20,
   },

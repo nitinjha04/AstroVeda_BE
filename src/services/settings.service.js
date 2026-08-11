@@ -9,7 +9,7 @@ const DEFAULTS = {
     maintenanceMode: false,
   },
   wallet: {
-    minRecharge: 50,
+    minRecharge: 1,
     maxRecharge: 50000,
     currency: 'INR',
   },

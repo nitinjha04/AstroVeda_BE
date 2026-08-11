@@ -51,6 +51,18 @@ app.use(
 app.options('*', cors());
 
 app.use(compression());
+
+/**
+ * Razorpay webhooks need the raw body for HMAC verification.
+ * Must be mounted before express.json().
+ */
+const webhookController = require('./controllers/webhook.controller');
+app.post(
+  '/api/v1/webhooks/razorpay',
+  express.raw({ type: 'application/json' }),
+  webhookController.razorpayWebhook
+);
+
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());

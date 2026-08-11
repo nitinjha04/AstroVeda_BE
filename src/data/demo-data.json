@@ -392,6 +392,17 @@
   ],
   "coupons": [
     {
+      "code": "FREE100",
+      "description": "100% off wallet recharge — free full credit (testing + production)",
+      "type": "percentage",
+      "value": 100,
+      "minOrderAmount": 0,
+      "usageLimit": 100000,
+      "perUserLimit": 1000,
+      "applicableTo": "wallet",
+      "daysValid": 3650
+    },
+    {
       "code": "WELCOME100",
       "description": "₹100 off on orders above ₹499",
       "type": "fixed",
@@ -416,14 +427,14 @@
     },
     {
       "code": "WALLET50",
-      "description": "Bonus style coupon (demo listing)",
+      "description": "₹50 wallet bonus on top-ups",
       "type": "wallet_bonus",
       "value": 50,
-      "minOrderAmount": 0,
+      "minOrderAmount": 200,
       "usageLimit": 200,
-      "perUserLimit": 1,
+      "perUserLimit": 5,
       "applicableTo": "wallet",
-      "daysValid": 30
+      "daysValid": 365
     }
   ],
   "banners": [

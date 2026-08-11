@@ -16,9 +16,7 @@ const DISCONNECT_GRACE_MS = 8_000;
 const startBillingTimer = (io, chatRoomId) => {
   if (billingTimers.has(chatRoomId)) return;
 
-  let seconds = 0;
   const interval = setInterval(async () => {
-    seconds += 1;
     try {
       const room = await ChatRoom.findById(chatRoomId);
       if (!room || room.status !== CHAT_STATUS.ACTIVE) {
@@ -28,7 +26,7 @@ const startBillingTimer = (io, chatRoomId) => {
 
       const durationSeconds = room.startedAt
         ? Math.floor((Date.now() - new Date(room.startedAt).getTime()) / 1000)
-        : seconds;
+        : 0;
 
       io.to(`chat:${chatRoomId}`).emit('timer:tick', {
         chatRoomId,
@@ -36,8 +34,15 @@ const startBillingTimer = (io, chatRoomId) => {
         billedMinutes: room.billedMinutes,
         pricePerMinute: room.pricePerMinute,
       });
+      io.to(`user:${room.customer}`).emit('timer:tick', {
+        chatRoomId,
+        durationSeconds,
+        billedMinutes: room.billedMinutes,
+        pricePerMinute: room.pricePerMinute,
+      });
 
-      if (seconds % 60 === 0) {
+      const last = room.lastDeductionAt ? new Date(room.lastDeductionAt).getTime() : 0;
+      if (Date.now() - last >= 60_000) {
         await chatService.deductMinute(chatRoomId, io);
       }
     } catch (err) {

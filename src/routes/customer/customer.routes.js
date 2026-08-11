@@ -33,7 +33,9 @@ router.get('/wallet', walletController.getWallet);
 router.get('/wallet/transactions', walletController.getTransactions);
 router.post('/wallet/recharge', rechargeRules, validate, walletController.createRecharge);
 router.post('/wallet/verify', walletController.verifyRecharge);
+router.get('/wallet/payments/:paymentId', walletController.paymentStatus);
 router.post('/wallet/confirm-stub', walletController.confirmStubRecharge);
+router.post('/wallet/coupon', walletController.validateCoupon);
 
 // Chat
 router.post('/chat/ai/start', chatController.startAi);
