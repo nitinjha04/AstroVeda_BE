@@ -102,10 +102,6 @@ const config = {
       /** Dashboard → Webhooks → Secret (falls back to key secret if unset) */
       webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_KEY_SECRET,
     },
-    stripe: {
-      secretKey: process.env.STRIPE_SECRET_KEY,
-      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-    },
   },
 
   email: {

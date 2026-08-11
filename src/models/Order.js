@@ -29,7 +29,7 @@ const orderSchema = new mongoose.Schema(
     couponCode: String,
     paymentMethod: {
       type: String,
-      enum: ['wallet', 'razorpay', 'stripe', 'cod'],
+      enum: ['wallet', 'razorpay', 'cod'],
       default: 'wallet',
     },
     paymentStatus: {

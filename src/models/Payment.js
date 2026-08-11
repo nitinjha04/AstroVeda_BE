@@ -10,7 +10,7 @@ const paymentSchema = new mongoose.Schema(
       enum: ['wallet_recharge', 'order', 'subscription'],
       required: true,
     },
-    gateway: { type: String, enum: ['razorpay', 'stripe'], required: true },
+    gateway: { type: String, enum: ['razorpay'], required: true },
     status: {
       type: String,
       enum: ['created', 'pending', 'authorized', 'captured', 'failed', 'refunded'],

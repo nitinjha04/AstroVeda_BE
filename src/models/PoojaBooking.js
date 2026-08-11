@@ -38,7 +38,7 @@ const poojaBookingSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['cod_stub', 'wallet', 'razorpay', 'stripe'],
+      enum: ['cod_stub', 'wallet', 'razorpay'],
       default: 'cod_stub',
     },
     status: {

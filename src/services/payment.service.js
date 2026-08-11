@@ -7,11 +7,9 @@ const couponService = require('./coupon.service');
 const { WALLET_TX_TYPE } = require('../utils/constants');
 const logger = require('../utils/logger');
 const Razorpay = require('razorpay');
-const Stripe = require('stripe');
 const { v4: uuidv4 } = require('uuid');
 
 let razorpay = null;
-let stripe = null;
 
 const getRazorpay = () => {
   if (!config.payment.razorpay.keyId || !config.payment.razorpay.keySecret) return null;
@@ -22,12 +20,6 @@ const getRazorpay = () => {
     });
   }
   return razorpay;
-};
-
-const getStripe = () => {
-  if (!config.payment.stripe.secretKey) return null;
-  if (!stripe) stripe = new Stripe(config.payment.stripe.secretKey);
-  return stripe;
 };
 
 /**
@@ -164,54 +156,7 @@ const createWalletRecharge = async (userId, amount, opts = {}) => {
     };
   }
 
-  if ((config.payment.gateway || 'razorpay') === 'stripe') {
-    const stripeClient = getStripe();
-    if (!stripeClient) throw new AppError('Stripe not configured', 503);
-
-    const intent = await stripeClient.paymentIntents.create({
-      amount: Math.round(payable * 100),
-      currency: 'inr',
-      metadata: {
-        userId: userId.toString(),
-        purpose: 'wallet_recharge',
-        creditAmount: String(creditAmount),
-        couponCode: couponApply?.code || '',
-      },
-    });
-
-    const payment = await Payment.create({
-      user: userId,
-      amount: creditAmount,
-      purpose: 'wallet_recharge',
-      gateway: 'stripe',
-      status: 'created',
-      gatewayOrderId: intent.id,
-      receipt,
-      metadata: {
-        clientSecret: intent.client_secret,
-        couponCode: couponApply?.code,
-        discount,
-        payable,
-        requestedAmount: gross,
-      },
-    });
-
-    if (couponApply?.coupon) {
-      payment.metadata.couponId = couponApply.coupon._id.toString();
-      await payment.save();
-    }
-
-    return {
-      paymentId: payment._id,
-      gateway: 'stripe',
-      clientSecret: intent.client_secret,
-      amount: creditAmount,
-      payable,
-      discount,
-      couponCode: couponApply?.code || null,
-    };
-  }
-
+  // Razorpay checkout
   const rp = getRazorpay();
   if (!rp) {
     throw new AppError(
@@ -412,5 +357,4 @@ module.exports = {
   confirmStubPayment,
   getPaymentStatus,
   getRazorpay,
-  getStripe,
 };
