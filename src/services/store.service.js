@@ -58,9 +58,11 @@ const getOrCreateCart = async (userId) => {
   return cart;
 };
 
-const addToCart = async (userId, { productId, variantId, quantity = 1 }) => {
+const addToCart = async (userId, { productId, variantId, quantity = 1, setQuantity = false } = {}) => {
   const product = await Product.findById(productId);
   if (!product || !product.isActive) throw new AppError('Product not found', 404);
+
+  const qty = Math.max(1, Number(quantity) || 1);
 
   let price = product.price;
   let stock = product.stock;
@@ -70,7 +72,7 @@ const addToCart = async (userId, { productId, variantId, quantity = 1 }) => {
     price = variant.price;
     stock = variant.stock;
   }
-  if (stock < quantity) throw new AppError('Insufficient stock', 400);
+  if (stock < qty) throw new AppError('Insufficient stock', 400);
 
   const cart = await getOrCreateCart(userId);
   const idx = cart.items.findIndex((i) => {
@@ -79,10 +81,11 @@ const addToCart = async (userId, { productId, variantId, quantity = 1 }) => {
   });
 
   if (idx >= 0) {
-    cart.items[idx].quantity += quantity;
+    cart.items[idx].quantity = setQuantity ? qty : cart.items[idx].quantity + qty;
     cart.items[idx].price = price;
+    if (cart.items[idx].quantity > stock) throw new AppError('Insufficient stock', 400);
   } else {
-    cart.items.push({ product: productId, variantId, quantity, price });
+    cart.items.push({ product: productId, variantId, quantity: qty, price });
   }
   await cart.save();
   return getOrCreateCart(userId);
@@ -186,9 +189,24 @@ const reserveStockForItems = async (orderItems) => {
 
 /**
  * Checkout via Razorpay or wallet.
+ * Replaces any prior cart lines with the request payload when `items` is provided,
+ * so retries never stack quantity into Razorpay totals.
  */
-const checkout = async (userId, { address, couponCode, paymentMethod = 'razorpay' } = {}) => {
+const checkout = async (userId, { address, couponCode, paymentMethod = 'razorpay', items } = {}) => {
   const method = paymentMethod === 'wallet' ? 'wallet' : 'razorpay';
+
+  if (Array.isArray(items) && items.length) {
+    await clearCart(userId);
+    for (const line of items) {
+      if (!line?.productId) continue;
+      await addToCart(userId, {
+        productId: line.productId,
+        variantId: line.variantId,
+        quantity: Number(line.quantity) || 1,
+        setQuantity: true,
+      });
+    }
+  }
 
   const cart = await Cart.findOne({ user: userId }).populate('items.product');
   if (!cart || !cart.items.length) throw new AppError('Cart is empty', 400);

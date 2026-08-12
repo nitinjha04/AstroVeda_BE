@@ -56,6 +56,7 @@ router.get('/store/products/:slug', storeController.getProduct);
 router.get('/cart', storeController.getCart);
 router.post('/cart', storeController.addToCart);
 router.patch('/cart/:itemId', storeController.updateCartItem);
+router.delete('/cart', storeController.clearCart);
 router.post('/checkout', storeController.checkout);
 router.get('/orders', storeController.myOrders);
 router.get('/wishlist', storeController.getWishlist);

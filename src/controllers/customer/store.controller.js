@@ -29,6 +29,12 @@ const updateCartItem = asyncHandler(async (req, res) => {
   return success(res, { data: cart });
 });
 
+const clearCartHandler = asyncHandler(async (req, res) => {
+  await storeService.clearCart(req.user._id);
+  const cart = await storeService.getOrCreateCart(req.user._id);
+  return success(res, { message: 'Cart cleared', data: cart });
+});
+
 const checkout = asyncHandler(async (req, res) => {
   const data = await storeService.checkout(req.user._id, req.body);
   return created(res, { message: 'Complete payment to place your order', data });
@@ -70,6 +76,7 @@ module.exports = {
   getCart,
   addToCart,
   updateCartItem,
+  clearCart: clearCartHandler,
   checkout,
   myOrders,
   toggleWishlist,
