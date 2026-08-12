@@ -30,8 +30,8 @@ const updateCartItem = asyncHandler(async (req, res) => {
 });
 
 const checkout = asyncHandler(async (req, res) => {
-  const order = await storeService.checkout(req.user._id, req.body);
-  return created(res, { message: 'Order placed', data: order });
+  const data = await storeService.checkout(req.user._id, req.body);
+  return created(res, { message: 'Complete payment to place your order', data });
 });
 
 const myOrders = asyncHandler(async (req, res) => {

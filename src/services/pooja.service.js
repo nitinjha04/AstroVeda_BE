@@ -1,5 +1,9 @@
 const { Pooja, PoojaBooking } = require('../models');
 const AppError = require('../utils/AppError');
+const paymentService = require('./payment.service');
+const walletService = require('./wallet.service');
+const { WALLET_TX_TYPE } = require('../utils/constants');
+const { v4: uuidv4 } = require('uuid');
 
 const startOfTodayUTC = () => {
   const d = new Date();
@@ -41,6 +45,9 @@ const getPoojaBySlug = async (slug) => {
   return pooja;
 };
 
+/**
+ * Book pooja via Razorpay (pending until paid) or wallet (confirmed immediately).
+ */
 const bookPooja = async (userId, payload) => {
   const {
     poojaId,
@@ -49,7 +56,10 @@ const bookPooja = async (userId, payload) => {
     preferredTime = 'morning',
     address,
     notes = '',
+    paymentMethod = 'razorpay',
   } = payload || {};
+
+  const method = paymentMethod === 'wallet' ? 'wallet' : 'razorpay';
 
   if (!scheduledDate) throw new AppError('Scheduled date is required', 400);
   if (!address?.name || !address?.phone || !address?.line1 || !address?.city || !address?.state || !address?.pincode) {
@@ -58,7 +68,7 @@ const bookPooja = async (userId, payload) => {
 
   const day = new Date(scheduledDate);
   if (Number.isNaN(day.getTime())) throw new AppError('Invalid scheduled date', 400);
-  day.setHours(12, 0, 0, 0); // midday local server — avoids TZ midnight edge
+  day.setHours(12, 0, 0, 0);
 
   const today = startOfTodayUTC();
   if (day < today) {
@@ -74,38 +84,117 @@ const bookPooja = async (userId, payload) => {
     ? preferredTime
     : 'morning';
 
+  const amount = Number(pooja.price);
+  if (!(amount > 0)) throw new AppError('This pooja has an invalid price', 400);
+
+  const addressDoc = {
+    name: address.name.trim(),
+    phone: address.phone.trim(),
+    line1: address.line1.trim(),
+    line2: (address.line2 || '').trim(),
+    city: address.city.trim(),
+    state: address.state.trim(),
+    pincode: address.pincode.trim(),
+    country: (address.country || 'India').trim(),
+  };
+
+  const snapshot = {
+    name: pooja.name,
+    slug: pooja.slug,
+    price: pooja.price,
+    glyph: pooja.glyph,
+    duration: pooja.duration,
+  };
+
+  if (method === 'wallet') {
+    const bal = await walletService.getBalance(userId);
+    if (!bal || Number(bal.balance) < amount) {
+      throw new AppError('Insufficient wallet balance', 402);
+    }
+
+    await walletService.debit({
+      userId,
+      amount,
+      type: WALLET_TX_TYPE.POOJA_PAYMENT,
+      description: `Pooja booking · ${pooja.name}`,
+    });
+
+    const booking = await PoojaBooking.create({
+      user: userId,
+      pooja: pooja._id,
+      poojaSnapshot: snapshot,
+      scheduledDate: day,
+      preferredTime: preferred,
+      address: addressDoc,
+      notes: String(notes || '').slice(0, 1000),
+      amount,
+      paymentStatus: 'paid',
+      paymentMethod: 'wallet',
+      status: 'confirmed',
+      paidAt: new Date(),
+    });
+
+    await booking.populate('pooja', 'name slug glyph duration price category');
+    const wallet = await walletService.getBalance(userId);
+
+    return {
+      booking,
+      paid: true,
+      paymentMethod: 'wallet',
+      amount,
+      wallet,
+    };
+  }
+
   const booking = await PoojaBooking.create({
     user: userId,
     pooja: pooja._id,
-    poojaSnapshot: {
-      name: pooja.name,
-      slug: pooja.slug,
-      price: pooja.price,
-      glyph: pooja.glyph,
-      duration: pooja.duration,
-    },
+    poojaSnapshot: snapshot,
     scheduledDate: day,
     preferredTime: preferred,
-    address: {
-      name: address.name.trim(),
-      phone: address.phone.trim(),
-      line1: address.line1.trim(),
-      line2: (address.line2 || '').trim(),
-      city: address.city.trim(),
-      state: address.state.trim(),
-      pincode: address.pincode.trim(),
-      country: (address.country || 'India').trim(),
-    },
+    address: addressDoc,
     notes: String(notes || '').slice(0, 1000),
-    amount: pooja.price,
-    paymentStatus: 'paid',
-    paymentMethod: 'cod_stub',
-    status: 'confirmed',
+    amount,
+    paymentStatus: 'pending',
+    paymentMethod: 'razorpay',
+    status: 'pending',
   });
 
+  const gateway = await paymentService.createGatewayOrder({
+    userId,
+    amount,
+    purpose: 'pooja_booking',
+    receipt: `pj_${uuidv4().slice(0, 8)}`,
+    poojaBookingId: booking._id,
+    notes: {
+      bookingId: booking._id.toString(),
+      poojaSlug: pooja.slug,
+    },
+    metadata: {
+      bookingId: booking._id.toString(),
+      poojaSlug: pooja.slug,
+      poojaName: pooja.name,
+    },
+  });
+
+  booking.payment = gateway.payment._id;
+  await booking.save();
   await booking.populate('pooja', 'name slug glyph duration price category');
-  return booking;
+
+  return {
+    booking,
+    paymentId: gateway.payment._id,
+    orderId: gateway.gatewayOrderId,
+    keyId: gateway.keyId,
+    amount: gateway.amount,
+    payable: gateway.amount,
+    currency: gateway.currency,
+    gateway: 'razorpay',
+    paid: false,
+    paymentMethod: 'razorpay',
+  };
 };
+
 
 const listMyBookings = async (userId, { filter = 'all' } = {}) => {
   const today = startOfTodayUTC();

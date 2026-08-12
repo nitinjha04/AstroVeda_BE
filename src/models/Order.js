@@ -30,8 +30,10 @@ const orderSchema = new mongoose.Schema(
     paymentMethod: {
       type: String,
       enum: ['wallet', 'razorpay', 'cod'],
-      default: 'wallet',
+      default: 'razorpay',
     },
+    payment: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment' },
+    stockReserved: { type: Boolean, default: false },
     paymentStatus: {
       type: String,
       enum: ['pending', 'paid', 'failed', 'refunded', 'partially_refunded'],

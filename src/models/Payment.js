@@ -7,7 +7,7 @@ const paymentSchema = new mongoose.Schema(
     currency: { type: String, default: 'INR' },
     purpose: {
       type: String,
-      enum: ['wallet_recharge', 'order', 'subscription'],
+      enum: ['wallet_recharge', 'order', 'pooja_booking', 'subscription'],
       required: true,
     },
     gateway: { type: String, enum: ['razorpay'], required: true },
@@ -22,6 +22,7 @@ const paymentSchema = new mongoose.Schema(
     gatewaySignature: String,
     receipt: String,
     order: { type: mongoose.Schema.Types.ObjectId, ref: 'Order' },
+    poojaBooking: { type: mongoose.Schema.Types.ObjectId, ref: 'PoojaBooking' },
     walletCredited: { type: Boolean, default: false },
     metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
     failureReason: String,

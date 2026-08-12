@@ -19,7 +19,10 @@ const getBySlug = asyncHandler(async (req, res) => {
 
 const book = asyncHandler(async (req, res) => {
   const data = await poojaService.bookPooja(req.user._id, req.body);
-  return created(res, { message: 'Pooja booked successfully', data });
+  return created(res, {
+    message: 'Complete payment to confirm your pooja booking',
+    data,
+  });
 });
 
 const myBookings = asyncHandler(async (req, res) => {

@@ -36,7 +36,15 @@ const verifyRecharge = asyncHandler(async (req, res) => {
     razorpayPaymentId: req.body.razorpayPaymentId || req.body.razorpay_payment_id,
     razorpaySignature: req.body.razorpaySignature || req.body.razorpay_signature,
   });
-  return success(res, { message: 'Wallet recharged', data });
+  const message =
+    data.purpose === 'wallet_recharge'
+      ? 'Wallet recharged'
+      : data.purpose === 'pooja_booking'
+        ? 'Pooja booking confirmed'
+        : data.purpose === 'order'
+          ? 'Order paid'
+          : 'Payment verified';
+  return success(res, { message, data });
 });
 
 const paymentStatus = asyncHandler(async (req, res) => {

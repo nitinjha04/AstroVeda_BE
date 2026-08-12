@@ -1,10 +1,10 @@
 const crypto = require('crypto');
 const config = require('../config');
-const { Payment, Coupon } = require('../models');
+const { Payment, Coupon, Order, PoojaBooking, Product, Cart } = require('../models');
 const AppError = require('../utils/AppError');
 const walletService = require('./wallet.service');
 const couponService = require('./coupon.service');
-const { WALLET_TX_TYPE } = require('../utils/constants');
+const { WALLET_TX_TYPE, ORDER_STATUS } = require('../utils/constants');
 const logger = require('../utils/logger');
 const Razorpay = require('razorpay');
 const { v4: uuidv4 } = require('uuid');
@@ -22,6 +22,65 @@ const getRazorpay = () => {
   return razorpay;
 };
 
+const requireRazorpay = () => {
+  const rp = getRazorpay();
+  if (!rp) {
+    throw new AppError(
+      'Razorpay is not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET on the server.',
+      503
+    );
+  }
+  return rp;
+};
+
+/** Create a Razorpay order + Payment document for any purpose. */
+const createGatewayOrder = async ({
+  userId,
+  amount,
+  purpose,
+  receipt,
+  notes = {},
+  orderId = null,
+  poojaBookingId = null,
+  metadata = {},
+}) => {
+  const rp = requireRazorpay();
+  const payable = Number(amount);
+  if (!(payable > 0)) throw new AppError('Payable amount must be greater than zero', 400);
+
+  const order = await rp.orders.create({
+    amount: Math.round(payable * 100),
+    currency: 'INR',
+    receipt: receipt || `pay_${uuidv4().slice(0, 10)}`,
+    notes: {
+      userId: userId.toString(),
+      purpose,
+      ...notes,
+    },
+  });
+
+  const payment = await Payment.create({
+    user: userId,
+    amount: payable,
+    purpose,
+    gateway: 'razorpay',
+    status: 'created',
+    gatewayOrderId: order.id,
+    receipt: receipt || order.receipt,
+    order: orderId || undefined,
+    poojaBooking: poojaBookingId || undefined,
+    metadata,
+  });
+
+  return {
+    payment,
+    gatewayOrderId: order.id,
+    keyId: config.payment.razorpay.keyId,
+    amount: payable,
+    currency: 'INR',
+  };
+};
+
 /**
  * Idempotent credit for a captured wallet recharge Payment document.
  */
@@ -32,10 +91,9 @@ const finalizeWalletPayment = async (
   if (!payment) throw new AppError('Payment not found', 404);
 
   if (payment.walletCredited) {
-    return { payment, alreadyCredited: true };
+    return { payment, alreadyCredited: true, purpose: 'wallet_recharge' };
   }
 
-  // Atomic claim so webhook + client verify don't double-credit
   const claimed = await Payment.findOneAndUpdate(
     { _id: payment._id, walletCredited: { $ne: true } },
     {
@@ -53,7 +111,7 @@ const finalizeWalletPayment = async (
 
   if (!claimed) {
     const current = await Payment.findById(payment._id);
-    return { payment: current, alreadyCredited: true };
+    return { payment: current, alreadyCredited: true, purpose: 'wallet_recharge' };
   }
 
   if (claimed.metadata?.couponId) {
@@ -84,7 +142,160 @@ const finalizeWalletPayment = async (
     `Wallet credited payment=${claimed._id} amount=${claimed.amount} source=${source} user=${claimed.user}`
   );
 
-  return { payment: claimed, wallet: result.wallet, alreadyCredited: false };
+  return {
+    payment: claimed,
+    wallet: result.wallet,
+    alreadyCredited: false,
+    purpose: 'wallet_recharge',
+  };
+};
+
+const reserveOrderStock = async (order) => {
+  if (!order || order.stockReserved) return;
+  for (const item of order.items) {
+    if (item.variantId) {
+      await Product.updateOne(
+        { _id: item.product, 'variants._id': item.variantId },
+        { $inc: { 'variants.$.stock': -item.quantity, soldCount: item.quantity } }
+      );
+    } else {
+      await Product.updateOne(
+        { _id: item.product },
+        { $inc: { stock: -item.quantity, soldCount: item.quantity } }
+      );
+    }
+  }
+  order.stockReserved = true;
+  await order.save();
+};
+
+const finalizeOrderPayment = async (
+  payment,
+  { gatewayPaymentId, gatewaySignature, source = 'unknown' } = {}
+) => {
+  if (!payment) throw new AppError('Payment not found', 404);
+
+  if (payment.status === 'captured') {
+    const order = payment.order ? await Order.findById(payment.order) : null;
+    return { payment, order, alreadyPaid: true, purpose: 'order' };
+  }
+
+  const claimed = await Payment.findOneAndUpdate(
+    { _id: payment._id, status: { $ne: 'captured' } },
+    {
+      $set: {
+        status: 'captured',
+        paidAt: new Date(),
+        ...(gatewayPaymentId ? { gatewayPaymentId } : {}),
+        ...(gatewaySignature ? { gatewaySignature } : {}),
+        'metadata.paidSource': source,
+      },
+    },
+    { new: true }
+  );
+
+  if (!claimed) {
+    const current = await Payment.findById(payment._id);
+    const order = current?.order ? await Order.findById(current.order) : null;
+    return { payment: current, order, alreadyPaid: true, purpose: 'order' };
+  }
+
+  const order = await Order.findById(claimed.order);
+  if (!order) {
+    logger.warn(`Order payment ${claimed._id}: order missing`);
+    return { payment: claimed, order: null, alreadyPaid: false, purpose: 'order' };
+  }
+
+  if (order.paymentStatus !== 'paid') {
+    order.paymentStatus = 'paid';
+    order.paymentMethod = 'razorpay';
+    order.status = ORDER_STATUS.CONFIRMED;
+    order.paidAt = new Date();
+    order.payment = claimed._id;
+    if (!order.tracking?.updates?.length) {
+      order.tracking = {
+        updates: [{ status: ORDER_STATUS.CONFIRMED, message: 'Order confirmed' }],
+      };
+    } else {
+      order.tracking.updates.push({
+        status: ORDER_STATUS.CONFIRMED,
+        message: 'Payment received',
+      });
+    }
+    await order.save();
+    await reserveOrderStock(order);
+  }
+
+  // Ensure cart is clear for this user
+  await Cart.findOneAndUpdate({ user: claimed.user }, { items: [], couponCode: null });
+
+  logger.info(`Order paid payment=${claimed._id} order=${order._id} source=${source}`);
+  return { payment: claimed, order, alreadyPaid: false, purpose: 'order' };
+};
+
+const finalizePoojaPayment = async (
+  payment,
+  { gatewayPaymentId, gatewaySignature, source = 'unknown' } = {}
+) => {
+  if (!payment) throw new AppError('Payment not found', 404);
+
+  if (payment.status === 'captured') {
+    const booking = payment.poojaBooking
+      ? await PoojaBooking.findById(payment.poojaBooking).populate(
+          'pooja',
+          'name slug glyph duration price category'
+        )
+      : null;
+    return { payment, booking, alreadyPaid: true, purpose: 'pooja_booking' };
+  }
+
+  const claimed = await Payment.findOneAndUpdate(
+    { _id: payment._id, status: { $ne: 'captured' } },
+    {
+      $set: {
+        status: 'captured',
+        paidAt: new Date(),
+        ...(gatewayPaymentId ? { gatewayPaymentId } : {}),
+        ...(gatewaySignature ? { gatewaySignature } : {}),
+        'metadata.paidSource': source,
+      },
+    },
+    { new: true }
+  );
+
+  if (!claimed) {
+    const current = await Payment.findById(payment._id);
+    const booking = current?.poojaBooking
+      ? await PoojaBooking.findById(current.poojaBooking)
+      : null;
+    return { payment: current, booking, alreadyPaid: true, purpose: 'pooja_booking' };
+  }
+
+  const booking = await PoojaBooking.findById(claimed.poojaBooking);
+  if (booking && booking.paymentStatus !== 'paid') {
+    booking.paymentStatus = 'paid';
+    booking.paymentMethod = 'razorpay';
+    booking.status = 'confirmed';
+    booking.paidAt = new Date();
+    booking.payment = claimed._id;
+    await booking.save();
+  }
+
+  if (booking) {
+    await booking.populate('pooja', 'name slug glyph duration price category');
+  }
+
+  logger.info(`Pooja paid payment=${claimed._id} booking=${booking?._id} source=${source}`);
+  return { payment: claimed, booking, alreadyPaid: false, purpose: 'pooja_booking' };
+};
+
+/** Route finalize by Payment.purpose */
+const finalizePayment = async (payment, opts = {}) => {
+  if (!payment) throw new AppError('Payment not found', 404);
+  if (payment.purpose === 'wallet_recharge') return finalizeWalletPayment(payment, opts);
+  if (payment.purpose === 'order') return finalizeOrderPayment(payment, opts);
+  if (payment.purpose === 'pooja_booking') return finalizePoojaPayment(payment, opts);
+  throw new AppError(`Unsupported payment purpose: ${payment.purpose}`, 400);
 };
 
 const createWalletRecharge = async (userId, amount, opts = {}) => {
@@ -156,70 +367,46 @@ const createWalletRecharge = async (userId, amount, opts = {}) => {
     };
   }
 
-  // Razorpay checkout
-  const rp = getRazorpay();
-  if (!rp) {
-    throw new AppError(
-      'Razorpay is not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET on the server.',
-      503
-    );
-  }
-
-  const order = await rp.orders.create({
-    amount: Math.round(payable * 100),
-    currency: 'INR',
+  const created = await createGatewayOrder({
+    userId,
+    amount: payable,
+    purpose: 'wallet_recharge',
     receipt,
     notes: {
-      userId: userId.toString(),
-      purpose: 'wallet_recharge',
       creditAmount: String(creditAmount),
       couponCode: couponApply?.code || '',
-      internalPaymentId: '', // filled after create
     },
-  });
-
-  const payment = await Payment.create({
-    user: userId,
-    amount: creditAmount,
-    purpose: 'wallet_recharge',
-    gateway: 'razorpay',
-    status: 'created',
-    gatewayOrderId: order.id,
-    receipt,
     metadata: {
       couponCode: couponApply?.code || null,
       couponId: couponApply?.coupon?._id?.toString() || null,
       discount,
       payable,
       requestedAmount: gross,
+      creditAmount,
     },
   });
 
-  // Attach internal id on order notes is optional — gatewayOrderId lookup is enough
-  try {
-    await rp.orders.edit?.(order.id, {
-      notes: {
-        userId: userId.toString(),
-        purpose: 'wallet_recharge',
-        creditAmount: String(creditAmount),
-        couponCode: couponApply?.code || '',
-        internalPaymentId: payment._id.toString(),
-      },
-    });
-  } catch {
-    /* order.edit may not exist on all SDK versions — ignore */
+  // Store credit amount on payment (wallet gets creditAmount, not payable)
+  if (creditAmount !== payable) {
+    created.payment.amount = creditAmount;
+    created.payment.metadata = {
+      ...created.payment.metadata,
+      payable,
+      creditAmount,
+    };
+    await created.payment.save();
   }
 
   return {
-    paymentId: payment._id,
+    paymentId: created.payment._id,
     gateway: 'razorpay',
-    orderId: order.id,
+    orderId: created.gatewayOrderId,
     amount: creditAmount,
     payable,
     discount,
     couponCode: couponApply?.code || null,
     currency: 'INR',
-    keyId: config.payment.razorpay.keyId,
+    keyId: created.keyId,
     free: false,
   };
 };
@@ -246,7 +433,7 @@ const verifyRazorpayPayment = async ({
   const expected = crypto.createHmac('sha256', secret).update(body).digest('hex');
   if (expected !== razorpaySignature) throw new AppError('Invalid payment signature', 400);
 
-  return finalizeWalletPayment(payment, {
+  return finalizePayment(payment, {
     gatewayPaymentId: razorpayPaymentId,
     gatewaySignature: razorpaySignature,
     source: 'client_verify',
@@ -254,7 +441,7 @@ const verifyRazorpayPayment = async ({
 };
 
 /**
- * Razorpay webhook — primary credit path.
+ * Razorpay webhook — primary settle path for wallet / order / pooja.
  * Signature: HMAC-SHA256(rawBody, webhook_secret)
  */
 const handleRazorpayWebhook = async (rawBody, signatureHeader) => {
@@ -280,7 +467,6 @@ const handleRazorpayWebhook = async (rawBody, signatureHeader) => {
   const eventName = event.event || '';
   logger.info(`Razorpay webhook event=${eventName}`);
 
-  // payment.captured | payment.authorized | order.paid
   let orderId = null;
   let paymentId = null;
 
@@ -289,7 +475,6 @@ const handleRazorpayWebhook = async (rawBody, signatureHeader) => {
     if (entity) {
       orderId = entity.order_id;
       paymentId = entity.id;
-      // Only credit on successful money capture / authorized (auto-capture)
       if (!['captured', 'authorized'].includes(entity.status) && eventName !== 'payment.captured') {
         return { handled: false, event: eventName, reason: `status ${entity.status}` };
       }
@@ -306,17 +491,14 @@ const handleRazorpayWebhook = async (rawBody, signatureHeader) => {
     return { handled: false, event: eventName, reason: 'no order id' };
   }
 
-  const payment = await Payment.findOne({
-    gatewayOrderId: orderId,
-    purpose: 'wallet_recharge',
-  });
+  const payment = await Payment.findOne({ gatewayOrderId: orderId });
 
   if (!payment) {
     logger.warn(`Razorpay webhook: no Payment for order ${orderId}`);
     return { handled: false, event: eventName, reason: 'payment not found' };
   }
 
-  const result = await finalizeWalletPayment(payment, {
+  const result = await finalizePayment(payment, {
     gatewayPaymentId: paymentId || payment.gatewayPaymentId,
     source: `webhook:${eventName}`,
   });
@@ -324,8 +506,10 @@ const handleRazorpayWebhook = async (rawBody, signatureHeader) => {
   return {
     handled: true,
     event: eventName,
+    purpose: payment.purpose,
     paymentId: payment._id,
     alreadyCredited: result.alreadyCredited,
+    alreadyPaid: result.alreadyPaid,
   };
 };
 
@@ -336,25 +520,41 @@ const confirmStubPayment = async () => {
 const getPaymentStatus = async (userId, paymentId) => {
   const payment = await Payment.findOne({ _id: paymentId, user: userId }).lean();
   if (!payment) throw new AppError('Payment not found', 404);
+
   let wallet = null;
-  if (payment.walletCredited) {
+  if (payment.purpose === 'wallet_recharge' && payment.walletCredited) {
     wallet = await walletService.getBalance(userId);
   }
+
+  const paid =
+    payment.status === 'captured' ||
+    payment.walletCredited === true ||
+    Boolean(payment.paidAt);
+
   return {
     paymentId: payment._id,
+    purpose: payment.purpose,
     status: payment.status,
+    paid,
     walletCredited: payment.walletCredited,
     amount: payment.amount,
     balance: wallet?.balance,
+    orderId: payment.order,
+    poojaBookingId: payment.poojaBooking,
   };
 };
 
 module.exports = {
   createWalletRecharge,
+  createGatewayOrder,
   verifyRazorpayPayment,
   handleRazorpayWebhook,
+  finalizePayment,
   finalizeWalletPayment,
+  finalizeOrderPayment,
+  finalizePoojaPayment,
   confirmStubPayment,
   getPaymentStatus,
   getRazorpay,
+  requireRazorpay,
 };

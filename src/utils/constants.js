@@ -25,6 +25,7 @@ const WALLET_TX_TYPE = Object.freeze({
   RECHARGE: 'recharge',
   CHAT_DEDUCTION: 'chat_deduction',
   ORDER_PAYMENT: 'order_payment',
+  POOJA_PAYMENT: 'pooja_payment',
   WITHDRAWAL: 'withdrawal',
   REFERRAL_BONUS: 'referral_bonus',
   COUPON_BONUS: 'coupon_bonus',

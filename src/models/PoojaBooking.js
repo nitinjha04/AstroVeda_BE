@@ -34,22 +34,24 @@ const poojaBookingSchema = new mongoose.Schema(
     paymentStatus: {
       type: String,
       enum: ['pending', 'paid', 'failed', 'refunded'],
-      default: 'paid', // gateway later — instant book marks paid for now
+      default: 'pending',
     },
     paymentMethod: {
       type: String,
       enum: ['cod_stub', 'wallet', 'razorpay'],
-      default: 'cod_stub',
+      default: 'razorpay',
     },
+    payment: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment' },
     status: {
       type: String,
       enum: ['pending', 'confirmed', 'scheduled', 'completed', 'cancelled'],
-      default: 'confirmed',
+      default: 'pending',
       index: true,
     },
     cancelledAt: Date,
     cancelReason: String,
     completedAt: Date,
+    paidAt: Date,
   },
   { timestamps: true }
 );

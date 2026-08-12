@@ -1,9 +1,10 @@
 const { Product, Category, Cart, Order, Coupon, Review } = require('../models');
 const AppError = require('../utils/AppError');
 const { ORDER_STATUS, WALLET_TX_TYPE } = require('../utils/constants');
+const paymentService = require('./payment.service');
 const walletService = require('./wallet.service');
 const { v4: uuidv4 } = require('uuid');
-const mongoose = require('mongoose');
+const config = require('../config');
 
 const slugify = (text) =>
   text
@@ -90,11 +91,7 @@ const clearCart = async (userId) => {
   await Cart.findOneAndUpdate({ user: userId }, { items: [], couponCode: null });
 };
 
-const checkout = async (userId, { address, couponCode, paymentMethod = 'wallet' }) => {
-  const cart = await Cart.findOne({ user: userId }).populate('items.product');
-  if (!cart || !cart.items.length) throw new AppError('Cart is empty', 400);
-  if (!address) throw new AppError('Shipping address required', 400);
-
+const buildCheckoutTotals = async (userId, cart, couponCode) => {
   let subtotal = 0;
   const orderItems = [];
 
@@ -119,8 +116,8 @@ const checkout = async (userId, { address, couponCode, paymentMethod = 'wallet' 
 
     if (stock < item.quantity) throw new AppError(`Insufficient stock for ${name}`, 400);
 
-    const total = price * item.quantity;
-    subtotal += total;
+    const lineTotal = price * item.quantity;
+    subtotal += lineTotal;
     orderItems.push({
       product: product._id,
       variantId: item.variantId,
@@ -129,7 +126,7 @@ const checkout = async (userId, { address, couponCode, paymentMethod = 'wallet' 
       image,
       price,
       quantity: item.quantity,
-      total,
+      total: lineTotal,
     });
   }
 
@@ -154,37 +151,65 @@ const checkout = async (userId, { address, couponCode, paymentMethod = 'wallet' 
 
   const shippingFee = subtotal - discount >= 999 ? 0 : 49;
   const total = Number((subtotal - discount + shippingFee).toFixed(2));
+  if (!(total > 0)) throw new AppError('Order total must be greater than zero', 400);
 
-  const runCheckout = async (session = null) => {
-    const sessOpts = session ? { session } : {};
+  return { subtotal, discount, shippingFee, total, orderItems, coupon };
+};
 
-    if (paymentMethod === 'wallet') {
-      await walletService.debit({
-        userId,
-        amount: total,
-        type: WALLET_TX_TYPE.ORDER_PAYMENT,
-        description: 'Order payment',
-        session: session || undefined,
-      });
+const reserveStockForItems = async (orderItems) => {
+  for (const item of orderItems) {
+    if (item.variantId) {
+      await Product.updateOne(
+        { _id: item.product, 'variants._id': item.variantId },
+        { $inc: { 'variants.$.stock': -item.quantity, soldCount: item.quantity } }
+      );
+    } else {
+      await Product.updateOne(
+        { _id: item.product },
+        { $inc: { stock: -item.quantity, soldCount: item.quantity } }
+      );
+    }
+  }
+};
+
+/**
+ * Checkout via Razorpay or wallet.
+ */
+const checkout = async (userId, { address, couponCode, paymentMethod = 'razorpay' } = {}) => {
+  const method = paymentMethod === 'wallet' ? 'wallet' : 'razorpay';
+
+  const cart = await Cart.findOne({ user: userId }).populate('items.product');
+  if (!cart || !cart.items.length) throw new AppError('Cart is empty', 400);
+  if (!address) throw new AppError('Shipping address required', 400);
+
+  const { subtotal, discount, shippingFee, total, orderItems, coupon } = await buildCheckoutTotals(
+    userId,
+    cart,
+    couponCode
+  );
+
+  if (method === 'wallet') {
+    const bal = await walletService.getBalance(userId);
+    if (!bal || Number(bal.balance) < total) {
+      throw new AppError('Insufficient wallet balance', 402);
     }
 
-    for (const item of orderItems) {
-      if (item.variantId) {
-        await Product.updateOne(
-          { _id: item.product, 'variants._id': item.variantId },
-          { $inc: { 'variants.$.stock': -item.quantity, soldCount: item.quantity } },
-          sessOpts
-        );
-      } else {
-        await Product.updateOne(
-          { _id: item.product },
-          { $inc: { stock: -item.quantity, soldCount: item.quantity } },
-          sessOpts
-        );
-      }
+    await walletService.debit({
+      userId,
+      amount: total,
+      type: WALLET_TX_TYPE.ORDER_PAYMENT,
+      description: 'Store order payment',
+    });
+
+    if (coupon) {
+      coupon.usageCount += 1;
+      coupon.usedBy.push({ user: userId, usedAt: new Date() });
+      await coupon.save();
     }
 
-    const orderPayload = {
+    await reserveStockForItems(orderItems);
+
+    const order = await Order.create({
       orderNumber: `AV${Date.now().toString(36).toUpperCase()}${uuidv4().slice(0, 4).toUpperCase()}`,
       user: userId,
       items: orderItems,
@@ -194,57 +219,88 @@ const checkout = async (userId, { address, couponCode, paymentMethod = 'wallet' 
       total,
       coupon: coupon?._id,
       couponCode: coupon?.code,
-      paymentMethod,
-      paymentStatus: paymentMethod === 'wallet' ? 'paid' : 'pending',
+      paymentMethod: 'wallet',
+      paymentStatus: 'paid',
       status: ORDER_STATUS.CONFIRMED,
       shippingAddress: address,
-      paidAt: paymentMethod === 'wallet' ? new Date() : undefined,
+      stockReserved: true,
+      paidAt: new Date(),
       tracking: {
-        updates: [{ status: ORDER_STATUS.CONFIRMED, message: 'Order confirmed' }],
+        updates: [{ status: ORDER_STATUS.CONFIRMED, message: 'Paid from wallet' }],
       },
-    };
-
-    let order;
-    if (session) {
-      const created = await Order.create([orderPayload], { session });
-      order = created[0];
-    } else {
-      order = await Order.create(orderPayload);
-    }
-
-    if (coupon) {
-      coupon.usageCount += 1;
-      coupon.usedBy.push({ user: userId, usedAt: new Date() });
-      await coupon.save(sessOpts);
-    }
+    });
 
     cart.items = [];
     cart.couponCode = undefined;
-    await cart.save(sessOpts);
+    await cart.save();
 
-    return order;
-  };
-
-  // Prefer multi-doc transaction on replica sets; fall back for standalone/memory Mongo
-  try {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
-      const order = await runCheckout(session);
-      await session.commitTransaction();
-      return order;
-    } catch (err) {
-      await session.abortTransaction();
-      throw err;
-    } finally {
-      session.endSession();
-    }
-  } catch (err) {
-    if (/replica set|Transaction numbers/i.test(err.message || '')) {
-      return runCheckout(null);
-    }
-    throw err;
+    const wallet = await walletService.getBalance(userId);
+    return {
+      order,
+      paid: true,
+      paymentMethod: 'wallet',
+      amount: total,
+      wallet,
+    };
   }
+
+  const order = await Order.create({
+    orderNumber: `AV${Date.now().toString(36).toUpperCase()}${uuidv4().slice(0, 4).toUpperCase()}`,
+    user: userId,
+    items: orderItems,
+    subtotal,
+    discount,
+    shippingFee,
+    total,
+    coupon: coupon?._id,
+    couponCode: coupon?.code,
+    paymentMethod: 'razorpay',
+    paymentStatus: 'pending',
+    status: ORDER_STATUS.PENDING,
+    shippingAddress: address,
+    stockReserved: false,
+    tracking: {
+      updates: [{ status: ORDER_STATUS.PENDING, message: 'Awaiting payment' }],
+    },
+  });
+
+  if (coupon) {
+    coupon.usageCount += 1;
+    coupon.usedBy.push({ user: userId, usedAt: new Date() });
+    await coupon.save();
+  }
+
+  const gateway = await paymentService.createGatewayOrder({
+    userId,
+    amount: total,
+    purpose: 'order',
+    receipt: `ord_${uuidv4().slice(0, 8)}`,
+    orderId: order._id,
+    notes: {
+      orderId: order._id.toString(),
+      orderNumber: order.orderNumber,
+    },
+    metadata: {
+      orderId: order._id.toString(),
+      orderNumber: order.orderNumber,
+    },
+  });
+
+  order.payment = gateway.payment._id;
+  await order.save();
+
+  return {
+    order,
+    paymentId: gateway.payment._id,
+    orderId: gateway.gatewayOrderId,
+    keyId: gateway.keyId || config.payment.razorpay.keyId,
+    amount: gateway.amount,
+    payable: gateway.amount,
+    currency: gateway.currency,
+    gateway: 'razorpay',
+    paid: false,
+    paymentMethod: 'razorpay',
+  };
 };
 
 const listOrders = async (userId, { page = 1, limit = 20 } = {}) => {

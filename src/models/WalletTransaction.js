@@ -28,7 +28,7 @@ const walletTransactionSchema = new mongoose.Schema(
     reference: { type: String, index: true },
     referenceModel: {
       type: String,
-      enum: ['Payment', 'ChatRoom', 'Order', 'Withdrawal', 'Coupon', 'Referral', 'Admin', null],
+      enum: ['Payment', 'ChatRoom', 'Order', 'PoojaBooking', 'Withdrawal', 'Coupon', 'Referral', 'Admin', null],
       default: null,
     },
     referenceId: { type: mongoose.Schema.Types.ObjectId },
