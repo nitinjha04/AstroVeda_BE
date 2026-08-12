@@ -5,6 +5,7 @@ WORKDIR /app
 RUN apk add --no-cache curl
 
 COPY package*.json ./
+# npm ci requires a lockfile fully in sync with package.json (use npm install locally after dep changes)
 RUN npm ci --omit=dev
 
 COPY . .
