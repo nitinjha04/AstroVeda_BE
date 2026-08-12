@@ -4,7 +4,7 @@ const { User, Wallet, Referral, Settings } = require('../models');
 const AppError = require('../utils/AppError');
 const { ROLES } = require('../utils/constants');
 const { generateTokenPair, hashToken, generateOtp } = require('../utils/tokens');
-const { sendOtpEmail } = require('../utils/email');
+const EmailService = require('../email/EmailService');
 const config = require('../config');
 const walletService = require('./wallet.service');
 const { WALLET_TX_TYPE } = require('../utils/constants');
@@ -26,13 +26,92 @@ const attachTokens = async (user) => {
   return tokens;
 };
 
-const register = async ({ name, email, phone, password, role = ROLES.CUSTOMER, referralCode }) => {
+const register = async ({ name, email, phone, password, role = ROLES.CUSTOMER, referralCode, otp }) => {
   if (role === ROLES.ADMIN) throw new AppError('Cannot self-register as admin', 403);
+  if (!email) throw new AppError('Email is required', 400);
+  if (!otp) throw new AppError('OTP is required to complete registration', 400);
+  if (!password || String(password).length < 6) throw new AppError('Password min 6 chars', 400);
 
-  const existing = await User.findOne({
-    $or: [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])],
-  });
-  if (existing) throw new AppError('User already exists with this email/phone', 409);
+  const normalizedEmail = email.toLowerCase().trim();
+  let user = await User.findOne({ email: normalizedEmail }).select('+password');
+  if (!user || !user.otp?.code) {
+    throw new AppError('Please request an OTP first', 400);
+  }
+  if (user.otp.expiresAt < new Date()) throw new AppError('OTP expired. Request a new one.', 400);
+  if (user.otp.code !== hashToken(String(otp).trim())) throw new AppError('Invalid OTP', 400);
+
+  if (user.password && user.isEmailVerified) {
+    throw new AppError('User already exists with this email', 409);
+  }
+
+  let referredBy = user.referredBy || null;
+  if (referralCode && !referredBy) {
+    const referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
+    if (referrer) referredBy = referrer._id;
+  }
+
+  user.name = (name || user.name || normalizedEmail.split('@')[0]).trim();
+  if (phone) user.phone = phone;
+  user.password = password;
+  user.role = role === ROLES.ASTROLOGER ? ROLES.ASTROLOGER : ROLES.CUSTOMER;
+  user.isEmailVerified = true;
+  user.otp = undefined;
+  if (referredBy) user.referredBy = referredBy;
+  if (!user.referralCode) user.referralCode = makeReferralCode();
+  await user.save();
+
+  await walletService.getOrCreateWallet(user._id);
+
+  if (referredBy) {
+    const existingRef = await Referral.findOne({ referred: user._id });
+    if (!existingRef) {
+      const settings = await Settings.findOne({ key: 'referral' });
+      const referrerBonus = settings?.value?.referrerBonus ?? 50;
+      const referredBonus = settings?.value?.referredBonus ?? 25;
+
+      await Referral.create({
+        referrer: referredBy,
+        referred: user._id,
+        code: (referralCode || '').toUpperCase(),
+        referrerBonus,
+        referredBonus,
+        status: 'pending',
+      });
+
+      await walletService.credit({
+        userId: user._id,
+        amount: referredBonus,
+        type: WALLET_TX_TYPE.REFERRAL_BONUS,
+        description: 'Welcome referral bonus',
+      });
+      await walletService.credit({
+        userId: referredBy,
+        amount: referrerBonus,
+        type: WALLET_TX_TYPE.REFERRAL_BONUS,
+        description: 'Referral reward',
+      });
+      await Referral.updateOne({ referred: user._id }, { status: 'credited', creditedAt: new Date() });
+    }
+  }
+
+  const tokens = await attachTokens(user);
+  return { user: user.toSafeObject(), ...tokens };
+};
+
+/** Step 1 of signup: store pending profile + email OTP via Brevo */
+const sendRegisterOtp = async ({ name, email, phone, referralCode }) => {
+  if (!email) throw new AppError('Email is required', 400);
+  const normalizedEmail = email.toLowerCase().trim();
+
+  let user = await User.findOne({ email: normalizedEmail }).select('+password');
+  if (user?.password && user.isEmailVerified) {
+    throw new AppError('An account with this email already exists. Please sign in.', 409);
+  }
+
+  if (phone) {
+    const phoneTaken = await User.findOne({ phone, email: { $ne: normalizedEmail } });
+    if (phoneTaken?.password) throw new AppError('Phone number already in use', 409);
+  }
 
   let referredBy = null;
   if (referralCode) {
@@ -40,49 +119,36 @@ const register = async ({ name, email, phone, password, role = ROLES.CUSTOMER, r
     if (referrer) referredBy = referrer._id;
   }
 
-  const user = await User.create({
-    name,
-    email,
-    phone,
-    password,
-    role,
-    referralCode: makeReferralCode(),
-    referredBy,
-  });
-
-  await walletService.getOrCreateWallet(user._id);
-
-  if (referredBy) {
-    const settings = await Settings.findOne({ key: 'referral' });
-    const referrerBonus = settings?.value?.referrerBonus ?? 50;
-    const referredBonus = settings?.value?.referredBonus ?? 25;
-
-    await Referral.create({
-      referrer: referredBy,
-      referred: user._id,
-      code: referralCode.toUpperCase(),
-      referrerBonus,
-      referredBonus,
-      status: 'pending',
+  if (!user) {
+    user = await User.create({
+      name: (name || normalizedEmail.split('@')[0]).trim(),
+      email: normalizedEmail,
+      phone: phone || undefined,
+      role: ROLES.CUSTOMER,
+      referralCode: makeReferralCode(),
+      referredBy,
+      isEmailVerified: false,
     });
-
-    await walletService.credit({
-      userId: user._id,
-      amount: referredBonus,
-      type: WALLET_TX_TYPE.REFERRAL_BONUS,
-      description: 'Welcome referral bonus',
-    });
-    await walletService.credit({
-      userId: referredBy,
-      amount: referrerBonus,
-      type: WALLET_TX_TYPE.REFERRAL_BONUS,
-      description: 'Referral reward',
-    });
-    await Referral.updateOne({ referred: user._id }, { status: 'credited', creditedAt: new Date() });
+    await walletService.getOrCreateWallet(user._id);
+  } else {
+    if (name) user.name = name.trim();
+    if (phone) user.phone = phone;
+    if (referredBy && !user.referredBy) user.referredBy = referredBy;
   }
 
-  const tokens = await attachTokens(user);
-  return { user: user.toSafeObject(), ...tokens };
+  const otp = generateOtp();
+  user.otp = {
+    code: hashToken(otp),
+    expiresAt: new Date(Date.now() + config.otp.expiryMinutes * 60 * 1000),
+  };
+  await user.save();
+
+  await EmailService.sendSignupOtp({ to: normalizedEmail, otp });
+
+  return {
+    message: 'OTP sent to your email',
+    email: normalizedEmail,
+  };
 };
 
 const login = async ({ email, phone, password }) => {
@@ -119,12 +185,11 @@ const sendOtp = async ({ email, phone }) => {
   };
   await user.save();
 
-  if (email) await sendOtpEmail(email, otp);
+  if (email) await EmailService.sendLoginOtp({ to: email, otp });
   // SMS ready: integrate SMS gateway with phone + otp
 
   return {
     message: 'OTP sent successfully',
-    ...(config.env !== 'production' && { debugOtp: otp }),
   };
 };
 
@@ -225,10 +290,9 @@ const forgotPassword = async (email) => {
     expiresAt: new Date(Date.now() + config.otp.expiryMinutes * 60 * 1000),
   };
   await user.save();
-  await sendOtpEmail(email, otp);
+  await EmailService.sendPasswordResetOtp({ to: email, otp });
   return {
     message: 'If account exists, reset instructions sent',
-    ...(config.env !== 'production' && { debugOtp: otp }),
   };
 };
 
@@ -247,6 +311,7 @@ const resetPassword = async ({ email, otp, newPassword }) => {
 
 module.exports = {
   register,
+  sendRegisterOtp,
   login,
   sendOtp,
   verifyOtp,

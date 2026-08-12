@@ -1,8 +1,10 @@
-const { Product, Category, Cart, Order, Coupon, Review } = require('../models');
+const { Product, Category, Cart, Order, Coupon, Review, User } = require('../models');
 const AppError = require('../utils/AppError');
 const { ORDER_STATUS, WALLET_TX_TYPE } = require('../utils/constants');
 const paymentService = require('./payment.service');
 const walletService = require('./wallet.service');
+const EmailService = require('../email/EmailService');
+const logger = require('../utils/logger');
 const { v4: uuidv4 } = require('uuid');
 const config = require('../config');
 
@@ -13,6 +15,16 @@ const slugify = (text) =>
     .trim()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '');
+
+const notifyOrderPlaced = async (order, userId) => {
+  try {
+    const customer =
+      (await User.findById(userId).select('name email').lean()) || { email: null, name: '' };
+    await EmailService.sendOrderPlacedEmails({ order, customer });
+  } catch (err) {
+    logger.warn(`Order email soft-fail: ${err.message}`);
+  }
+};
 
 const listProducts = async ({ page = 1, limit = 20, category, search, featured, sort = '-createdAt' } = {}) => {
   const filter = { isActive: true };
@@ -233,6 +245,8 @@ const checkout = async (userId, { address, couponCode, paymentMethod = 'razorpay
     cart.items = [];
     cart.couponCode = undefined;
     await cart.save();
+
+    await notifyOrderPlaced(order, userId);
 
     const wallet = await walletService.getBalance(userId);
     return {

@@ -2,10 +2,17 @@ const { body } = require('express-validator');
 
 const registerRules = [
   body('name').trim().notEmpty().withMessage('Name is required'),
-  body('email').optional().isEmail().withMessage('Valid email required'),
-  body('phone').optional().isMobilePhone('any').withMessage('Valid phone required'),
+  body('email').isEmail().withMessage('Valid email required'),
+  body('phone').optional({ checkFalsy: true }).isMobilePhone('any').withMessage('Valid phone required'),
   body('password').isLength({ min: 6 }).withMessage('Password min 6 chars'),
+  body('otp').isLength({ min: 4, max: 8 }).withMessage('OTP required'),
   body('role').optional().isIn(['customer', 'astrologer']),
+];
+
+const registerOtpRules = [
+  body('name').trim().notEmpty().withMessage('Name is required'),
+  body('email').isEmail().withMessage('Valid email required'),
+  body('phone').optional({ checkFalsy: true }).isMobilePhone('any').withMessage('Valid phone required'),
 ];
 
 const loginRules = [
@@ -43,6 +50,7 @@ const productRules = [
 
 module.exports = {
   registerRules,
+  registerOtpRules,
   loginRules,
   otpSendRules,
   otpVerifyRules,

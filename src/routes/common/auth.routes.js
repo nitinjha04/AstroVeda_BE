@@ -5,6 +5,7 @@ const validate = require('../../middlewares/validate');
 const { authLimiter, otpLimiter } = require('../../middlewares/rateLimiter');
 const {
   registerRules,
+  registerOtpRules,
   loginRules,
   otpSendRules,
   otpVerifyRules,
@@ -12,6 +13,7 @@ const {
 
 const router = express.Router();
 
+router.post('/register/otp', otpLimiter, registerOtpRules, validate, authController.sendRegisterOtp);
 router.post('/register', authLimiter, registerRules, validate, authController.register);
 router.post('/login', authLimiter, loginRules, validate, authController.login);
 router.post('/otp/send', otpLimiter, otpSendRules, validate, authController.sendOtp);

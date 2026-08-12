@@ -33,6 +33,11 @@ const register = asyncHandler(async (req, res) => {
   });
 });
 
+const sendRegisterOtp = asyncHandler(async (req, res) => {
+  const data = await authService.sendRegisterOtp(req.body);
+  return success(res, { message: data.message, data });
+});
+
 const login = asyncHandler(async (req, res) => {
   const data = await authService.login(req.body);
   return respondWithAuth(res, {
@@ -101,6 +106,7 @@ const me = asyncHandler(async (req, res) => {
 
 module.exports = {
   register,
+  sendRegisterOtp,
   login,
   sendOtp,
   verifyOtp,

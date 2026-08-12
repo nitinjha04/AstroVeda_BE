@@ -1,9 +1,10 @@
 const crypto = require('crypto');
 const config = require('../config');
-const { Payment, Coupon, Order, PoojaBooking, Product, Cart } = require('../models');
+const { Payment, Coupon, Order, PoojaBooking, Product, Cart, User } = require('../models');
 const AppError = require('../utils/AppError');
 const walletService = require('./wallet.service');
 const couponService = require('./coupon.service');
+const EmailService = require('../email/EmailService');
 const { WALLET_TX_TYPE, ORDER_STATUS } = require('../utils/constants');
 const logger = require('../utils/logger');
 const Razorpay = require('razorpay');
@@ -228,6 +229,13 @@ const finalizeOrderPayment = async (
 
   // Ensure cart is clear for this user
   await Cart.findOneAndUpdate({ user: claimed.user }, { items: [], couponCode: null });
+
+  try {
+    const customer = await User.findById(claimed.user).select('name email').lean();
+    await EmailService.sendOrderPlacedEmails({ order, customer });
+  } catch (err) {
+    logger.warn(`Order paid email soft-fail: ${err.message}`);
+  }
 
   logger.info(`Order paid payment=${claimed._id} order=${order._id} source=${source}`);
   return { payment: claimed, order, alreadyPaid: false, purpose: 'order' };

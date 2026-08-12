@@ -105,11 +105,34 @@ const config = {
   },
 
   email: {
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT, 10) || 587,
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
+    /**
+     * Brevo / Sendinblue Transactional Email via HTTPS API (@sendinblue/client).
+     * Render blocks SMTP — do not use Nodemailer for delivery.
+     */
+    enabled: process.env.EMAIL_ENABLED === 'true' || process.env.EMAIL_ENABLED === '1',
+    apiKey: process.env.SENDINBLUE_API_KEY || process.env.BREVO_API_KEY || '',
     from: process.env.EMAIL_FROM || 'AstroVerse <noreply@astroverse.com>',
+    senderName: process.env.BREVO_SENDER_NAME || process.env.EMAIL_FROM_NAME || '',
+    senderEmail: process.env.BREVO_SENDER_EMAIL || process.env.EMAIL_FROM_ADDRESS || '',
+    adminEmail: process.env.ADMIN_EMAIL || '',
+    /** Optional JSON: { "example.com": "orders@example.com" } */
+    storeOrderAdminEmails: (() => {
+      try {
+        return process.env.STORE_ORDER_ADMIN_EMAILS
+          ? JSON.parse(process.env.STORE_ORDER_ADMIN_EMAILS)
+          : {};
+      } catch {
+        return {};
+      }
+    })(),
+    /** Optional JSON: { "example.com": "Brand <noreply@example.com>" } */
+    fromByDomain: (() => {
+      try {
+        return process.env.EMAIL_FROM_BY_DOMAIN ? JSON.parse(process.env.EMAIL_FROM_BY_DOMAIN) : {};
+      } catch {
+        return {};
+      }
+    })(),
   },
 
   google: {

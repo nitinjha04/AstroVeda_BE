@@ -1,5 +1,5 @@
 const { Notification } = require('../models');
-const { sendEmail } = require('../utils/email');
+const EmailService = require('../email/EmailService');
 const logger = require('../utils/logger');
 
 const create = async ({ userId, title, body, type = 'system', data = {}, channel = 'in_app' }) => {
@@ -52,7 +52,12 @@ const markAllRead = async (userId) => {
 
 const sendEmailNotification = async ({ to, title, body }) => {
   try {
-    await sendEmail({ to, subject: title, html: `<p>${body}</p>`, text: body });
+    await EmailService.sendGeneric({
+      to,
+      subject: title,
+      html: `<p>${body}</p>`,
+      mustDeliver: false,
+    });
   } catch (err) {
     logger.warn(`Email notification failed: ${err.message}`);
   }
